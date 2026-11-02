@@ -84,6 +84,9 @@ def _positionen(text: str, v: dict) -> list[Position]:
         elif ergebnis:
             ergebnis[-1].bezeichnung = _anfuegen(ergebnis[-1].bezeichnung, z.strip())
     return ergebnis
+def _ocr_nummer(t: str | None) -> str | None:
+    """Gegenprobe der Rechnungsnummer: typische Lesefehler der Texterkennung (O0/O statt 0, Leerzeichen)."""
+    return re.sub(r"O0?", "0", t).replace(" ", "") if t else t
 def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
     v = vorlage
     kaeufer = Partei("")
@@ -94,7 +97,7 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         kaeufer = Partei(**{k: w.strip() for k, w in m.groupdict().items() if w})
     steuern = {_satz(m["satz"]): betrag(m["betrag"]) for m in re.finditer(v["steuern"], text, re.MULTILINE)} if v.get("steuern") else {}
     opt = lambda n: _feld(text, v, n)
-    if "nummer_kontrolle" in v["felder"] and opt("nummer_kontrolle") != opt("nummer"):
+    if "nummer_kontrolle" in v["felder"] and _ocr_nummer(opt("nummer_kontrolle")) != opt("nummer"):
         raise VorlagenFehler(f"Rechnungsnummer uneinheitlich gelesen: {opt('nummer')} / {opt('nummer_kontrolle')}")
     faellig = datum(opt("faellig")) if opt("faellig") else None
     if not faellig and opt("zahlungsziel_tage"):           # „Zahlungsziel 7 Tage …“ → Rechnungsdatum + 7

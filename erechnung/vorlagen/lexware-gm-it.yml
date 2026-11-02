@@ -4,11 +4,13 @@
 name: lexware-gm-it
 schluesselwoerter: ["GM - IT Solutions - Marvin Gawenda", "Rechnungsnr.:", "Zwischensumme (netto)"]
 felder:
-  # Nummernkreis GM IT: RE + Ziffern. Bewusst eng: die Texterkennung liest 0 auch als „O0“ (REO0146),
-  # die Nummer deckt kein Summenabgleich ab → lieber Fehler als falsche Nummer.
-  nummer: 'Rechnungsnr\.:\s*(RE\d+)$'
-  # zweite Fundstelle (Überschrift); fehlt sie oder weicht sie ab → Fehler
-  nummer_kontrolle: '^Rechnung (RE\d+)$'
+  # Nummernkreis GM IT: RE + Ziffern, aus der Überschrift (eigene Zeile, große Schrift → auch per
+  # Texterkennung sauber). Bewusst eng: die Nummer deckt kein Summenabgleich ab → lieber Fehler als falsch.
+  nummer: '^Rechnung (RE\d+)\s*$'
+  # Gegenprobe „Rechnungsnr.:“ (kleine Schrift im Kopfblock). Die Texterkennung liest dort 0 als O/O0,
+  # setzt Leerzeichen und hängt den Adressblock davor (Edge-Druck, VM 108). Normalisiert wird nur diese
+  # Gegenprobe (O0/O → 0, Leerzeichen weg); weicht sie danach ab → Fehler.
+  nummer_kontrolle: 'Rechnungsnr\.:\s*(RE[\dO ]*\d)\s*$'
   # O statt 0 ist in einem Datum eindeutig (datum() ersetzt es)
   datum: 'Datum:\s*([\dO]{2}\.[\dO]{2}\.[\dO]{4})'
   leistungsdatum: '(?:Liefer|Leistungs)datum:\s*([\dO]{2}\.[\dO]{2}\.[\dO]{4})'

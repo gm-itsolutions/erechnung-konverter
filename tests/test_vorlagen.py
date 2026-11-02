@@ -139,6 +139,20 @@ def test_lexware_nummer_uneinheitlich():
     text = _ocr_lexware().replace("Rechnung RE9146", "Rechnung RE9148")      # Überschrift verlesen
     with pytest.raises(VorlagenFehler, match="Rechnungsnummer uneinheitlich"):
         rechnung_aus_text(text, finde_vorlage(text, vorlagen), VERKAEUFER)
-    text = _ocr_lexware().replace("Rechnungsnr.: RE9146", "Rechnungsnr.: REO9146")   # O statt 0: nie raten
+    text = _ocr_lexware().replace("Rechnungsnr.: RE9146", "Rechnungsnr.: REO9146")   # zusätzliches O: bleibt Fehler
+    with pytest.raises(VorlagenFehler, match="Rechnungsnummer uneinheitlich"):
+        rechnung_aus_text(text, finde_vorlage(text, vorlagen), VERKAEUFER)
+    text = _ocr_lexware().replace("Rechnung RE9146", "Rechnung RE 9146")             # Überschrift unsauber: Fehler
     with pytest.raises(VorlagenFehler, match="Feld nummer"):
         rechnung_aus_text(text, finde_vorlage(text, vorlagen), VERKAEUFER)
+
+
+@pytest.mark.parametrize("gelesen", ["REO0146", "REO01 46", "RE01 46", "REO146", "RE0146"])
+def test_lexware_nummer_ocr_gegenprobe(gelesen):
+    """Echter Edge-Druck (VM 108): Überschrift sauber, „Rechnungsnr.:“ mit O/O0 statt 0, Leerzeichen,
+    und vom Adressblock daneben eingeleitet. Nummer kommt aus der Überschrift, Gegenprobe normalisiert."""
+    from erechnung.vorlagen import STANDARD
+    text = _ocr_lexware().replace("RE9146", "RE0146")
+    text = text.replace("Rechnungsnr.: RE0146", f"Pritzwalk OT Beispielort Musterstraße Rechnungsnr.: {gelesen}")
+    r = rechnung_aus_text(text, finde_vorlage(text, lade_vorlagen(STANDARD)), VERKAEUFER)
+    assert r.nummer == "RE0146"
