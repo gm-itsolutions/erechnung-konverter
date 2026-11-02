@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 import pytest
 from facturx import xml_check_xsd
+from lxml import etree
 from erechnung.betraege import betraege
 from erechnung.cii import erzeuge_cii
 from erechnung.modell import summenabgleich
@@ -32,3 +33,21 @@ def test_xsd_gueltig(nummer):
     (AUSGABE / f"{nummer}.xml").write_bytes(xml)
     assert xml_check_xsd(xml, flavor="factur-x", level="en16931")
     assert betraege(xml) == betraege((Path(DATEN) / f"{nummer}.lexware.xml").read_bytes())
+
+def _lexware(nummer):
+    return etree.parse(str(Path(DATEN) / f"{nummer}.lexware.xml"))
+
+@pytest.mark.parametrize("nummer", ["RE0146", "RE0148", "RE0149"])
+def test_faellig_wie_lexware(nummer):
+    r = lies_rechnung(Path(DATEN) / f"{nummer}.pdf", lade_vorlagen(STANDARD), VERKAEUFER)
+    soll = _lexware(nummer).xpath("string(//*[local-name()='DueDateDateTime']/*)")
+    assert r.faellig.strftime("%Y%m%d") == soll
+
+@pytest.mark.parametrize("nummer", ["RE0146", "RE0148", "RE0149"])
+def test_bezeichnung_wie_lexware(nummer):
+    """Bezeichnung = Lexware-Name + Beschreibung, Silbentrennung aufgelöst (Lexware druckt „- “ als „•“)."""
+    r = lies_rechnung(Path(DATEN) / f"{nummer}.pdf", lade_vorlagen(STANDARD), VERKAEUFER)
+    soll = [" ".join(p.xpath("string(.//*[local-name()='Name'])").split()
+                     + p.xpath("string(.//*[local-name()='Description'])").split())
+            for p in _lexware(nummer).xpath("//*[local-name()='SpecifiedTradeProduct']")]
+    assert [" ".join(p.bezeichnung.replace("•", "-").split()) for p in r.positionen] == soll

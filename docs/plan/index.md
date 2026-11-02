@@ -43,7 +43,7 @@
 | 10 | `task-10-vm-test-app.md` | VM 108: Einrichtung und Druck ohne Freigabe | Subagent | 90 Min. | 09 | erledigt 02.11.2026 (docs/testprotokoll.md) |
 | 11 | `task-11-freigabe-010.md` | Freigabe `v0.1.0` per YubiKey | **Marvin** | 5 Min. | 09 | erledigt (Marvin, 02.11.2026) |
 | 12 | `task-12-vm-test-update.md` | VM 108: Erstinstallation über gm-update | Subagent | 30 Min. | 10, 11 | erledigt (Installation über gm-update 0.1.4 durch einrichten.ps1) |
-| 13 | `task-13-vorlage-verfeinern.md` | Vorlage mit gedruckten PDFs verfeinern, `v0.1.1` | Subagent | 45 Min. | 10 | offen |
+| 13 | `task-13-vorlage-verfeinern.md` | Vorlage mit gedruckten PDFs verfeinern, `v0.1.1` | Subagent | 45 Min. | 10 | teilweise (Branch task-13: Fälligkeit, Silbentrennung); offen: gedruckte PDFs von VM 108 |
 | 14 | `task-14-freigabe-update-test.md` | Freigabe `v0.1.1` (Marvin), Update-Test auf VM | **Marvin** + Subagent | 30 Min. | 12, 13 | offen |
 
 **Reihenfolge / Wellen (heute Nacht):**

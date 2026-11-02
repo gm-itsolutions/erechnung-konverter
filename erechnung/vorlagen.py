@@ -1,5 +1,6 @@
 """Vorlagen je Layout (YAML, angelehnt an invoice2data) → Rechnung. Spezifikation Abschnitt 5."""
 import re
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 import pdfplumber
@@ -47,6 +48,15 @@ def _feld(text: str, v: dict, name: str) -> str | None:
     return m.group(1).strip() if m else None
 def _satz(t: str) -> Decimal:
     return Decimal(t.replace(",", ".").replace("%", "").strip())
+def _anfuegen(text: str, zeile: str) -> str:
+    """Folgezeile anhängen; Trennstrich am Zeilenende: klein weiter = Silbentrennung, sonst echter Bindestrich."""
+    if not re.search(r"\w-$", text):
+        return f"{text} {zeile}"
+    if re.match(r"(?:und|oder|bzw\.|sowie)\b", zeile):      # „Einzugs- und Trennrolle“
+        return f"{text} {zeile}"
+    if zeile[:1].islower():                                  # „Dokumentenscan-“ + „ner“
+        return text[:-1] + zeile
+    return text + zeile                                      # „E-Mail-“ + „Postfach“
 def _positionen(text: str, v: dict) -> list[Position]:
     p = v["positionen"]
     zeilen = text.splitlines()
@@ -68,7 +78,7 @@ def _positionen(text: str, v: dict) -> list[Position]:
                 einzelpreis=betrag(g["einzelpreis"]), netto=betrag(g["netto"]),
                 ust_satz=_satz(g["ust_satz"]) if g.get("ust_satz") else Decimal(str(p.get("ust_satz", 19)))))
         elif ergebnis:
-            ergebnis[-1].bezeichnung += " " + z.strip()
+            ergebnis[-1].bezeichnung = _anfuegen(ergebnis[-1].bezeichnung, z.strip())
     return ergebnis
 def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
     v = vorlage
@@ -80,12 +90,15 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         kaeufer = Partei(**{k: w.strip() for k, w in m.groupdict().items() if w})
     steuern = {_satz(m["satz"]): betrag(m["betrag"]) for m in re.finditer(v["steuern"], text, re.MULTILINE)} if v.get("steuern") else {}
     opt = lambda n: _feld(text, v, n)
+    faellig = datum(opt("faellig")) if opt("faellig") else None
+    if not faellig and opt("zahlungsziel_tage"):           # „Zahlungsziel 7 Tage …“ → Rechnungsdatum + 7
+        faellig = datum(opt("datum")) + timedelta(days=int(opt("zahlungsziel_tage")))
     return Rechnung(
         nummer=opt("nummer"), datum=datum(opt("datum")), verkaeufer=verkaeufer, kaeufer=kaeufer,
         positionen=_positionen(text, v), summe_netto=betrag(opt("summe_netto")), summe_brutto=betrag(opt("summe_brutto")),
         summe_ust=betrag(opt("summe_ust")) if opt("summe_ust") else None, steuern=steuern,
         leistungsdatum=datum(opt("leistungsdatum")) if opt("leistungsdatum") else None,
-        faellig=datum(opt("faellig")) if opt("faellig") else None, vorlage=v["name"])
+        faellig=faellig, vorlage=v["name"])
 def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei) -> Rechnung:
     text = pdf_text(pdf)
     if not text.strip():

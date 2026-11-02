@@ -1,7 +1,7 @@
 from decimal import Decimal as D
 from pathlib import Path
 import pytest
-from erechnung.vorlagen import VorlagenFehler, finde_vorlage, lade_vorlagen, lies_rechnung, rechnung_aus_text
+from erechnung.vorlagen import VorlagenFehler, _anfuegen, finde_vorlage, lade_vorlagen, lies_rechnung, rechnung_aus_text
 from erechnung.modell import summenabgleich
 from hilfen import VERKAEUFER, pdf_aus_text
 VORLAGE = """
@@ -83,8 +83,26 @@ def test_lexware_synthetisch():
     r = rechnung_aus_text(text, finde_vorlage(text, vorlagen), VERKAEUFER)
     assert r.nummer == "RE9146" and r.summe_brutto == D("238.00")
     assert summenabgleich(r) == {D("19"): (D("200.00"), D("38.00"))}
-    assert (str(r.datum), str(r.leistungsdatum), r.faellig) == ("2026-10-15", "2026-10-14", None)
+    assert (str(r.datum), str(r.leistungsdatum), str(r.faellig)) == ("2026-10-15", "2026-10-14", "2026-10-22")
     assert (r.kaeufer.name, r.kaeufer.strasse, r.kaeufer.plz, r.kaeufer.ort) == ("Beispiel Handel GmbH", "Hauptstraße 5", "19348", "Perleberg")
     assert [p.bezeichnung for p in r.positionen] == [
         "Arbeitsstunde • Wartung Server - 2 • Prüfung Datensicherung", "Patchkabel Cat. 6 - 1 m Farbe grau"]
     assert [(p.menge, p.einheit) for p in r.positionen] == [(D("2"), "HUR"), (D("2"), "H87")]
+@pytest.mark.parametrize("text,zeile,soll", [
+    ("Wartung Dokumentenscan-", "ner: Reinigung", "Wartung Dokumentenscanner: Reinigung"),
+    ("Tausch der Einzugs-", "rollen", "Tausch der Einzugsrollen"),
+    ("Wartungskit (Einzugs-", "und Trennrolle)", "Wartungskit (Einzugs- und Trennrolle)"),
+    ("Abholung oder Bring-", "oder Holservice", "Abholung oder Bring- oder Holservice"),
+    ("neues E-Mail-", "Postfach", "neues E-Mail-Postfach"),
+    ("Drucker (ABC-", "PRT-003)", "Drucker (ABC-PRT-003)"),
+    ("Wartung Server -", "2", "Wartung Server - 2"),
+    ("Arbeitsstunde", "• Prüfung", "Arbeitsstunde • Prüfung"),
+])
+def test_silbentrennung(text, zeile, soll):
+    assert _anfuegen(text, zeile) == soll
+def test_lexware_zusatzzeile_stoert_nicht():
+    from erechnung.vorlagen import STANDARD
+    text = (Path(__file__).parent / "daten" / "lexware-synthetisch.txt").read_text(encoding="utf-8")
+    text = text.replace("Datum: 15.10.2026\n", "Datum: 15.10.2026\nAbteilung Einkauf\n")
+    r = rechnung_aus_text(text, finde_vorlage(text, lade_vorlagen(STANDARD)), VERKAEUFER)
+    assert (r.kaeufer.name, r.kaeufer.strasse, r.kaeufer.plz) == ("Beispiel Handel GmbH", "Hauptstraße 5", "19348")

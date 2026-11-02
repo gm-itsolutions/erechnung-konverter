@@ -98,6 +98,7 @@ felder:                                                 # je eine Gruppe; Pflich
   datum: 'Rechnungsdatum\s+(\d{2}\.\d{2}\.\d{4})'
   leistungsdatum: 'Leistungsdatum\s+(\d{2}\.\d{2}\.\d{4})'     # optional
   faellig: 'zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})'              # optional
+  zahlungsziel_tage: '^Zahlungsziel (\d+) Tage'                # optional, ohne faellig: datum + N Tage
   summe_netto: 'Gesamtbetrag netto\s+([\d.,]+)'
   summe_ust: 'Umsatzsteuer \d+ %\s+([\d.,]+)'                  # optional, sonst aus steuern
   summe_brutto: 'Gesamtbetrag brutto\s+([\d.,]+)'
@@ -112,7 +113,7 @@ positionen:
 einheiten: {Stunde: HUR, Std.: HUR, Stück: H87, Pauschal: C62}   # sonst C62
 ```
 
-Regeln: Genau eine Vorlage muss passen, sonst Fehler („keine Vorlage“ / „mehrere Vorlagen: a, b“). Zeilen zwischen `start` und `ende`, die nicht auf `zeile` passen, nicht leer sind und nicht unter `ignorieren` fallen, werden an die Bezeichnung der vorigen Position angehängt. Zusätzliche Vorlagen ohne Release: Ordner `vorlagen\` neben `konfig.json` (nur Administratoren schreiben).
+Regeln: Genau eine Vorlage muss passen, sonst Fehler („keine Vorlage“ / „mehrere Vorlagen: a, b“). Zeilen zwischen `start` und `ende`, die nicht auf `zeile` passen, nicht leer sind und nicht unter `ignorieren` fallen, werden an die Bezeichnung der vorigen Position angehängt. Endet die Bezeichnung auf Wort + `-`, gilt: Folgezeile beginnt klein → Silbentrennung, Strich entfällt („Dokumentenscan-“ + „ner“); beginnt sie mit „und/oder/bzw./sowie“ → Strich bleibt, mit Leerzeichen („Einzugs- und …“); sonst Strich bleibt ohne Leerzeichen („E-Mail-“ + „Postfach“). Ein mehrzeiliger Käufername (Zusatzzeile unter der Firma) wird nicht zusammengesetzt, nur die erste Zeile gilt als Name. Zusätzliche Vorlagen ohne Release: Ordner `vorlagen\` neben `konfig.json` (nur Administratoren schreiben).
 
 ## 6. Ordner und Rechte (Windows)
 

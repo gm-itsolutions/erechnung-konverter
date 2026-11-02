@@ -5,6 +5,8 @@ felder:
   nummer: 'Rechnungsnr\.:\s*(\S+)'
   datum: 'Datum:\s*(\d{2}\.\d{2}\.\d{4})'
   leistungsdatum: '(?:Liefer|Leistungs)datum:\s*(\d{2}\.\d{2}\.\d{4})'
+  # Lexware: Fälligkeit = Rechnungsdatum + N Tage (so steht es auch im DueDate der Lexware-XML)
+  zahlungsziel_tage: '^Zahlungsziel (\d+) Tage'
   summe_netto: '^Zwischensumme \(netto\)\s+([\d.]+,\d{2})$'
   summe_brutto: '^Gesamtbetrag\s+([\d.]+,\d{2})$'
 steuern: '^Umsatzsteuer (?P<satz>\d+(?:,\d+)?) %\s+(?P<betrag>[\d.]+,\d{2})$'
