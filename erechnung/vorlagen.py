@@ -39,18 +39,29 @@ def _pruefe(v: dict, datei: Path) -> dict:
     except (AssertionError, re.error) as e:
         raise VorlagenFehler(f"Vorlage {datei.name}: {e}") from None
     return v
+def _lade_datei(datei: Path) -> dict:
+    """Eine Datei laden und prüfen; jeder Fehler wird zum VorlagenFehler mit Dateiname."""
+    try:
+        if datei.stat().st_size > MAX_BYTES:
+            raise VorlagenFehler(f"Vorlage {datei.name}: zu groß (höchstens {MAX_BYTES} Byte)")
+        v = yaml.safe_load(datei.read_text(encoding="utf-8")) or {}
+        if not isinstance(v, dict):
+            raise VorlagenFehler(f"Vorlage {datei.name}: kein Abschnitt name/felder/…")
+        return _pruefe(v, datei)
+    except VorlagenFehler:
+        raise
+    except (yaml.YAMLError, UnicodeDecodeError, OSError, TypeError, AttributeError, KeyError) as e:
+        raise VorlagenFehler(f"Vorlage {datei.name}: {type(e).__name__}: {e}") from None
 def lade_vorlagen(*ordner: Path, tolerant: bool = False) -> list[dict]:
     vorlagen = []
     for o in ordner:
         if o.is_dir():
             for datei in sorted(o.glob("*.yml")):
                 try:
-                    if datei.stat().st_size > MAX_BYTES:
-                        raise VorlagenFehler(f"Vorlage {datei.name}: zu groß (höchstens {MAX_BYTES} Byte)")
-                    vorlagen.append(_pruefe(yaml.safe_load(datei.read_text(encoding="utf-8")) or {}, datei))
-                except (VorlagenFehler, yaml.YAMLError, UnicodeDecodeError) as e:
+                    vorlagen.append(_lade_datei(datei))
+                except VorlagenFehler as e:
                     if not tolerant:
-                        raise VorlagenFehler(str(e)) from None
+                        raise
                     log.warning("Vorlage übersprungen: %s: %s", datei, e)
     return vorlagen
 def finde_vorlage(text: str, vorlagen: list[dict]) -> dict:

@@ -1,4 +1,3 @@
-import copy
 from pathlib import Path
 import pytest, yaml
 from erechnung.bereiche import BereichsFehler, pruefe_bereichsvorlage
@@ -63,3 +62,16 @@ def test_tolerant_ueberspringt(tmp_path, caplog):
     (tmp_path / "b.yml").write_text(DATEI.read_text(encoding="utf-8"), encoding="utf-8")
     assert [v["name"] for v in lade_vorlagen(tmp_path, tolerant=True)] == ["test-bereiche"]
     assert "a.yml" in caplog.text
+
+@pytest.mark.parametrize("inhalt", ["- a\n", "foo\n", "name: x\nschluesselwoerter: [a]\nfelder: {nummer: 5}\npositionen: [1]\n"])
+def test_kaputte_dateien(tmp_path, inhalt):
+    (tmp_path / "a.yml").write_text(inhalt, encoding="utf-8")
+    (tmp_path / "b.yml").write_text(DATEI.read_text(encoding="utf-8"), encoding="utf-8")
+    assert [v["name"] for v in lade_vorlagen(tmp_path, tolerant=True)] == ["test-bereiche"]
+    with pytest.raises(VorlagenFehler, match="a.yml"):
+        lade_vorlagen(tmp_path)
+def test_art_pflicht():
+    v = gut()
+    v["art"] = "regex"
+    with pytest.raises(BereichsFehler, match="art"):
+        pruefe_bereichsvorlage(v)

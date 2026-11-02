@@ -36,6 +36,7 @@ def _feld(f, wo: str) -> None:
         _anker(f["anker"], wo)
 def pruefe_bereichsvorlage(v: dict) -> dict:
     _schluessel(v, {"name", "art", "format", "schluesselwoerter", "angelernt", "felder", "steuern", "positionen", "einheiten"}, "Vorlage")
+    _ja(v.get("art") == "bereiche", "art muss bereiche sein")
     _ja(isinstance(v.get("name"), str) and NAME.fullmatch(v["name"]), "name: nur a-z, 0-9, -, 2–40 Zeichen")
     _ja(v.get("format") == FORMAT, f"format muss {FORMAT} sein")
     sw = v.get("schluesselwoerter")
