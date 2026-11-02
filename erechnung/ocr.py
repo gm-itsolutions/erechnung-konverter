@@ -16,6 +16,7 @@ MAX_SEITEN = 20
 FRIST = 120           # Sekunden je Seite und Lesart
 GESAMTFRIST = 600     # Sekunden je Rechnung; danach keine weitere Lesart
 # Lesarten in dieser Reihenfolge, bis Vorlage, Nummern-Gegenprobe und Summenabgleich passen (Spezifikation 3.2)
+TSV_SCHALTER = ("-c", "tessedit_create_txt=1", "-c", "tessedit_create_tsv=1")   # ohne tessdata/configs
 LESARTEN = (("psm 6", 6, False), ("psm 6 ohne Linien", 6, True), ("psm 4", 4, False), ("psm 4 ohne Linien", 4, True))
 
 
@@ -69,7 +70,8 @@ def erkenne(pdf: Path, arbeit: Path, aufruf: list[str]) -> Iterator[tuple[str, s
 
 
 def erkenne_seiten(pdf: Path, arbeit: Path, aufruf: list[str]) -> Iterator[tuple[str, str, list[Seite]]]:
-    """Wie `erkenne`, je Lesart zusätzlich die Wörter mit Lage je Seite (Tesseract `txt tsv` in einem Lauf)."""
+    """Wie `erkenne`, je Lesart zusätzlich die Wörter mit Lage je Seite aus demselben Tesseract-Lauf
+    (`-c tessedit_create_txt=1 -c tessedit_create_tsv=1`; die Konfigdateien `txt`/`tsv` liefert das Paket nicht mit)."""
     yield from _lesarten(pdf, arbeit, aufruf, tsv=True)
 
 
@@ -100,7 +102,7 @@ def _lesarten(pdf: Path, arbeit: Path, aufruf: list[str], tsv: bool) -> Iterator
                 basis = Path(tmp) / f"{i}-{n}"
                 try:
                     subprocess.run([*aufruf, str(bild), str(basis), "-l", "deu", "--psm", str(psm), "--dpi", str(dpi),
-                                    *(("txt", "tsv") if tsv else ())],
+                                    *(TSV_SCHALTER if tsv else ())],
                                    check=True, capture_output=True, timeout=FRIST,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 except subprocess.CalledProcessError as e:
@@ -108,7 +110,10 @@ def _lesarten(pdf: Path, arbeit: Path, aufruf: list[str], tsv: bool) -> Iterator
                                      f"{e.stderr.decode(errors='replace').strip()[-300:]}") from None
                 except (subprocess.TimeoutExpired, OSError) as e:
                     raise ValueError(f"Texterkennung fehlgeschlagen (Seite {i + 1}): {e}") from None
-                seiten.append(basis.with_suffix(".txt").read_text(encoding="utf-8"))
-                if tsv:
-                    woerter.append(tsv_woerter(basis.with_suffix(".tsv").read_text(encoding="utf-8"), *groesse))
+                try:
+                    seiten.append(basis.with_suffix(".txt").read_text(encoding="utf-8"))
+                    if tsv:
+                        woerter.append(tsv_woerter(basis.with_suffix(".tsv").read_text(encoding="utf-8"), *groesse))
+                except OSError as e:
+                    raise ValueError(f"Texterkennung ohne Ergebnisdatei (Seite {i + 1}): {Path(e.filename).name}") from None
             yield name, bereinige("\n".join(s.rstrip("\n\f") for s in seiten)), woerter if tsv else None

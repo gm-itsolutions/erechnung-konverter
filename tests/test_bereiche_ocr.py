@@ -23,13 +23,14 @@ def test_tsv_woerter():
     assert ocr.tsv_woerter(TSV, 1000, 2000) == [Wort("Beleg", 0.1, 0.1, 0.15, 0.11)]
 
 
-# Ersatz-Tesseract: schreibt txt und, mit „txt tsv“ im Aufruf, auch tsv; merkt sich die Aufrufe
+# Ersatz-Tesseract: schreibt txt und, mit tessedit_create_tsv=1 im Aufruf, auch tsv; merkt sich die Aufrufe
 ERSATZ = """import pathlib, sys
-bild, basis = sys.argv[1:3]
+args = [a for a in sys.argv[1:] if a != "OHNE_TSV"]
+bild, basis = args[:2]
 with open(pathlib.Path(basis).parent.parent.parent / "aufrufe.txt", "a", encoding="utf-8") as f:
-    f.write(" ".join(sys.argv[3:]) + "\\n")
+    f.write(" ".join(args[2:]) + "\\n")
 pathlib.Path(basis + ".txt").write_text("Beispiel Werkstatt Belegnummer", encoding="utf-8")
-if sys.argv[-2:] == ["txt", "tsv"]:
+if "tessedit_create_tsv=1" in sys.argv and "OHNE_TSV" not in sys.argv:
     pathlib.Path(basis + ".tsv").write_text("level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext\\n5\\t1\\t1\\t1\\t1\\t1\\t10\\t20\\t30\\t10\\t90\\tBeleg\\n", encoding="utf-8")
 """
 
@@ -50,14 +51,48 @@ def test_erkenne_seiten_mit_ersatz(tmp_path):
     assert text == "Beispiel Werkstatt Belegnummer" and len(seiten) == 1 and seiten[0][0].text == "Beleg"
     assert list((tmp_path / "arbeit").iterdir()) == []                              # temporärer Ordner gelöscht
     aufrufe = (tmp_path / "aufrufe.txt").read_text(encoding="utf-8").splitlines()
-    assert len(aufrufe) == 4 and all(a.endswith("txt tsv") for a in aufrufe)
+    assert len(aufrufe) == 4 and all(a.endswith("-c tessedit_create_txt=1 -c tessedit_create_tsv=1") for a in aufrufe)
 
 
 def test_erkenne_ohne_tsv(tmp_path):
-    """erkenne bleibt beim alten Aufruf (ohne txt tsv) und liefert (Name, Text)."""
+    """erkenne bleibt beim alten Aufruf (ohne TSV-Schalter) und liefert (Name, Text)."""
     pdf, aufruf = _ersatz(tmp_path)
     assert next(ocr.erkenne(pdf, tmp_path / "arbeit", aufruf)) == ("psm 6", "Beispiel Werkstatt Belegnummer")
-    assert not (tmp_path / "aufrufe.txt").read_text(encoding="utf-8").strip().endswith("tsv")
+    assert "tessedit" not in (tmp_path / "aufrufe.txt").read_text(encoding="utf-8")
+
+
+def test_erkenne_seiten_ohne_tsv_datei(tmp_path):
+    """Schreibt Tesseract keine .tsv (z. B. unbekannte Option), meldet die Lesart einen ValueError mit Seite."""
+    pdf, aufruf = _ersatz(tmp_path)
+    with pytest.raises(ValueError, match=r"Texterkennung ohne Ergebnisdatei \(Seite 1\): 0-0\.tsv"):
+        next(ocr.erkenne_seiten(pdf, tmp_path / "arbeit", [*aufruf, "OHNE_TSV"]))
+
+
+def _tessdata_nur_deu(ziel: Path) -> Path | None:
+    """tessdata-Ordner wie im Windows-Paket: nur deu.traineddata, keine configs (txt/tsv)."""
+    import re, subprocess
+    aus = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True).stdout
+    m = re.search(r'"(.+?)"', aus)
+    deu = Path(m.group(1)) / "deu.traineddata" if m else None
+    if not deu or not deu.is_file():
+        return None
+    ziel.mkdir()
+    shutil.copy(deu, ziel / "deu.traineddata")
+    return ziel
+
+
+@pytest.mark.skipif(not shutil.which("tesseract"), reason="tesseract nicht installiert")
+def test_erkenne_seiten_tessdata_ohne_configs(tmp_path):
+    td = _tessdata_nur_deu(tmp_path / "tessdata")
+    if td is None:
+        pytest.skip("deu.traineddata nicht gefunden")
+    (tmp_path / "arbeit").mkdir()
+    pdf = tmp_path / "b.pdf"
+    pdf.write_bytes(bild_pdf(werkstatt_pdf(MUSTER1, SUMMEN1)))
+    g = ocr.erkenne_seiten(pdf, tmp_path / "arbeit", [shutil.which("tesseract"), "--tessdata-dir", str(td)])
+    name, text, seiten = next(g)
+    g.close()
+    assert "Belegnummer" in text and "Belegnummer" in [w.text for w in seiten[0]]
 
 
 def _vorlagen(tmp_path):
