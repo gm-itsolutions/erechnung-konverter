@@ -40,9 +40,9 @@
 | 07 | `task-07-einrichtung.md` | `einrichten.ps1`, `gm-update.json`, Runbook | Subagent | 45 Min. | – | erledigt (main fbc7e50 + task-08) |
 | 08 | `task-08-pruefung.md` | Mustang-Prüfung, Echt-Tests gegen Lexware-XML | Subagent | 30 Min. | 02, 05 | erledigt ohne Mustang (offen: Marvin, docs/pruefung.md) |
 | 09 | `task-09-release-010.md` | Tag `v0.1.0`, CI grün, Artefakt prüfen | Claude (Hauptsitzung) | 15 Min. | 06, 07, 08 | erledigt (v0.1.0, ZIP d50ebcdc…) |
-| 10 | `task-10-vm-test-app.md` | VM 108: Einrichtung und Druck ohne Freigabe | Subagent | 90 Min. | 09 | offen |
-| 11 | `task-11-freigabe-010.md` | Freigabe `v0.1.0` per YubiKey | **Marvin** | 5 Min. | 09 | offen |
-| 12 | `task-12-vm-test-update.md` | VM 108: Erstinstallation über gm-update | Subagent | 30 Min. | 10, 11 | offen |
+| 10 | `task-10-vm-test-app.md` | VM 108: Einrichtung und Druck ohne Freigabe | Subagent | 90 Min. | 09 | erledigt 02.11.2026 (docs/testprotokoll.md) |
+| 11 | `task-11-freigabe-010.md` | Freigabe `v0.1.0` per YubiKey | **Marvin** | 5 Min. | 09 | erledigt (Marvin, 02.11.2026) |
+| 12 | `task-12-vm-test-update.md` | VM 108: Erstinstallation über gm-update | Subagent | 30 Min. | 10, 11 | erledigt (Installation über gm-update 0.1.4 durch einrichten.ps1) |
 | 13 | `task-13-vorlage-verfeinern.md` | Vorlage mit gedruckten PDFs verfeinern, `v0.1.1` | Subagent | 45 Min. | 10 | offen |
 | 14 | `task-14-freigabe-update-test.md` | Freigabe `v0.1.1` (Marvin), Update-Test auf VM | **Marvin** + Subagent | 30 Min. | 12, 13 | offen |
 
