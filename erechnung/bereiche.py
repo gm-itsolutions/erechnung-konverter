@@ -9,7 +9,7 @@ from typing import NamedTuple
 
 import pdfplumber
 
-from .modell import Partei, betrag
+from .modell import Nachlass, Partei, Position, Rechnung, betrag, runde
 
 FORMAT = 1
 PFLICHT_FELDER = ("nummer", "datum", "summe_netto", "summe_brutto", "kaeufer")
@@ -256,3 +256,94 @@ def _steuern(seiten, v, ocr, spur) -> dict[Decimal, Decimal]:
         if spur is not None:
             spur[f"steuern{n + 1}"] = {"seite": i, "rahmen": _spur(s["rahmen"], dx, dy)}
     return ergebnis
+
+def _posbetrag(t: str) -> Decimal:
+    """Betrag mit Vorzeichen (Positionszeilen können negativ sein); ValueError bei Unlesbarem."""
+    m = BETRAG.findall(t)
+    if not m:
+        raise ValueError(f"kein Betrag in {t!r}")
+    return betrag(m[-1])
+def _menge(t: str) -> Decimal:
+    m = re.fullmatch(r"-?\d[\d.]*(?:,\d+)?", t.strip())
+    if not m:
+        raise ValueError(f"keine Menge in {t!r}")
+    return betrag(m[0])
+def _satz_posbetrag(t: str) -> Decimal:
+    m = re.search(SATZ, t)
+    if not m:
+        raise ValueError(f"kein Steuersatz in {t!r}")
+    return Decimal(m[1].replace(",", "."))
+def _oder_none(lesen, text: str):
+    try:
+        return lesen(text) if text.strip() else None
+    except (ValueError, ArithmeticError):
+        return None
+def _naechster(t, rahmen):
+    return min(t, key=lambda h: (h[0] - rahmen[0]) ** 2 + (h[1] - rahmen[1]) ** 2) if t else None
+def positionen_aus_bereichen(seiten, v, ocr=False, spur=None):
+    from .vorlagen import _anfuegen          # Silbentrennung wie Regex-Vorlagen; lokal gegen Zirkelimport
+    p, kopf, ende = v["positionen"], v["positionen"]["kopf"], v["positionen"].get("ende")
+    arten = [s["art"] for s in p["spalten"]]
+    grenzen0 = [p["links"], *(s["bis"] for s in p["spalten"])]
+    kr = kopf["rahmen"]
+    kx, sx, ergebnis, ignoriert = kr[0], 1.0, [], []   # Lage und Maßstab des Kopfs (Edge „an Seite anpassen“)
+    for i, seite in enumerate(seiten):
+        k = _naechster(treffer(seite, kopf["text"], ocr), kr)
+        if i == 0 and k is None:
+            raise BereichsFehler(f"Tabellenkopf „{kopf['text']}“ nicht gefunden (Vorlage {v['name']})")
+        if k:
+            kx, sx = k[0], (k[2] - k[0]) / (kr[2] - kr[0])
+        oben = k[1] + (kr[3] - kr[1]) * sx if k else 0.0
+        e = _naechster(treffer(seite, ende["text"], ocr), ende["rahmen"]) if ende else None
+        unten = e[1] if e else p["unten"]
+        grenzen = [kx + (g - kr[0]) * sx for g in grenzen0]
+        if spur is not None:
+            spur[f"positionen{i + 1}"] = {"seite": i, "rahmen": [round(grenzen[0], 4), round(oben, 4),
+                                                                 round(grenzen[-1], 4), round(unten, 4)]}
+        begonnen = k is not None
+        for z in zeilen([w for w in seite if oben <= (w.top + w.bottom) / 2 < unten]):
+            zelle = {a: [] for a in arten}
+            for w in z:
+                xm = (w.x0 + w.x1) / 2
+                for a, l, r in zip(arten, grenzen, grenzen[1:]):
+                    if l <= xm < r:
+                        zelle[a].append(w.text)
+                        break
+            t = {a: " ".join(ws) for a, ws in zelle.items()}
+            netto = _oder_none(_posbetrag, t.get("netto", ""))
+            if not begonnen and netto is None:
+                continue                      # Folgeseite ohne Kopf: Briefkopf überspringen
+            begonnen = True
+            einheit, mt = t.get("einheit", "").strip(), t.get("menge", "")
+            if "menge_einheit" in t:
+                m = re.match(r"\s*(-?\d[\d.]*(?:,\d+)?)\s*(.*)", t["menge_einheit"])
+                mt, einheit = (m[1], m[2].strip()) if m else ("", "")
+            menge = _oder_none(_menge, mt)
+            preis = _oder_none(_posbetrag, t.get("einzelpreis", ""))
+            bez = t.get("bezeichnung", "").strip()
+            if netto is not None and (menge is not None or preis is not None):
+                menge = menge if menge is not None else Decimal("1")
+                satz = _oder_none(_satz_posbetrag, t.get("ust_satz", ""))
+                if preis is None:
+                    preis = runde(netto / menge) if menge else netto
+                ergebnis.append(Position(
+                    nr=t.get("nr", "").strip() or str(len(ergebnis) + 1), bezeichnung=bez, menge=menge,
+                    einheit=v.get("einheiten", {}).get(einheit, "C62"), einzelpreis=preis, netto=netto,
+                    ust_satz=satz if satz is not None else Decimal(str(p.get("ust_satz", 19)))))
+            elif netto is None and bez and ergebnis:
+                ergebnis[-1].bezeichnung = _anfuegen(ergebnis[-1].bezeichnung, bez)
+            elif any(s.strip() for s in t.values()):
+                ignoriert.append(" ".join(w.text for w in z))
+        if e:
+            break
+    if not ergebnis:
+        raise BereichsFehler(f"keine Positionen gefunden (Vorlage {v['name']})")
+    return ergebnis, ignoriert
+def rechnung_aus_bereichen(seiten, v, verkaeufer, ocr=False, spur=None):
+    k = kopf_aus_bereichen(seiten, v, ocr, spur)
+    pos, _ = positionen_aus_bereichen(seiten, v, ocr, spur)
+    return Rechnung(
+        nummer=k["nummer"], datum=k["datum"], verkaeufer=verkaeufer, kaeufer=k["kaeufer"], positionen=pos,
+        summe_netto=k["summe_netto"], summe_brutto=k["summe_brutto"], summe_ust=k["summe_ust"], steuern=k["steuern"],
+        leistungsdatum=k["leistungsdatum"], faellig=k["faellig"], vorlage=v["name"],
+        nachlaesse=[Nachlass(k["nachlass"], "Nachlass")] if k["nachlass"] else [])

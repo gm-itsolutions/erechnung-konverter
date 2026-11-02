@@ -148,6 +148,12 @@ def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
     text = pdf_text(pdf)
     if len(re.findall(r"\w", text)) >= MIN_ZEICHEN:
         v = finde_vorlage(text, vorlagen)
+        if v.get("art") == "bereiche":
+            from .bereiche import rechnung_aus_bereichen, woerter_aus_pdf
+            try:
+                return rechnung_aus_bereichen(woerter_aus_pdf(pdf), v, verkaeufer)
+            except BereichsFehler as e:
+                raise VorlagenFehler(str(e)) from None
         if v.get("layout"):
             text = pdf_text(pdf, layout=True)
         return rechnung_aus_text(text, v, verkaeufer)
@@ -161,11 +167,18 @@ def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
     try:
         for name, text in lesarten:
             versucht.append(name)
+            text, seiten = text if isinstance(text, tuple) else (text, None)   # (Text, Wörter je Seite), Task 05
             try:
                 v = finde_vorlage(text, vorlagen)
                 if len(versucht) > 1 and "nummer_kontrolle" not in v["felder"]:
                     raise VorlagenFehler("ohne Gegenprobe der Rechnungsnummer (nummer_kontrolle) nicht verwendet")
-                r = rechnung_aus_text(text, v, verkaeufer)
+                if v.get("art") == "bereiche":
+                    if seiten is None:
+                        raise VorlagenFehler("Bereichsvorlage braucht die Wortlagen der Texterkennung")
+                    from .bereiche import rechnung_aus_bereichen
+                    r = rechnung_aus_bereichen(seiten, v, verkaeufer, ocr=True)
+                else:
+                    r = rechnung_aus_text(text, v, verkaeufer)
                 summenabgleich(r)
             except ValueError as e:
                 if erster and str(e) != str(erster):

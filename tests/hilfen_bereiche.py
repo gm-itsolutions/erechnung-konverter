@@ -23,10 +23,16 @@ def seiten_aus(tmp_path: Path, pdf: bytes):
 
 
 def werkstatt_pdf(zeilen, summen, dx=0.0, dy=0.0, umbruch_nach=None, uebertrag="", kopf_wiederholen=True,
-                  nummer="BW-2026-17") -> bytes:
+                  nummer="BW-2026-17", skala=1.0) -> bytes:
     puffer = BytesIO()
     c = canvas.Canvas(puffer, pagesize=A4)
     c.setFont("Helvetica", 10)
+
+    def skalieren():
+        c.translate(W * (1 - skala) / 2, H * (1 - skala) / 2)
+        c.scale(skala, skala)
+
+    skalieren()
 
     def t(x, y, s):
         c.drawString((x + dx) * W, H * (1 - (y + dy)) - 8, s)
@@ -50,6 +56,7 @@ def werkstatt_pdf(zeilen, summen, dx=0.0, dy=0.0, umbruch_nach=None, uebertrag="
             t(0.08, 0.95, "Seite 1/2")
             c.showPage()
             c.setFont("Helvetica", 10)
+            skalieren()
             t(0.08, 0.08, "Beispiel Werkstatt · Feldweg 2 · 16928 Pritzwalk")
             t(0.50, 0.10, "Belegnummer")
             t(0.70, 0.10, nummer)
