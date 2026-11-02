@@ -37,6 +37,25 @@ Die vollständigen Lizenztexte liegen je Paket in tesseract\lizenzen\<paket>\
 (aus den conda-Paketen übernommen; Apache 2.0: tesseract\lizenzen\tesseract\tesseract\LICENSE).
 Quellcode: https://github.com/conda-forge/<paket>-feedstock und die oben genannten Projekte.
 
+Prüfung der E-Rechnungen (Ordner mustang\ und java\)
+----------------------------------------------------
+Mustang-CLI 2.26.0             Apache License 2.0       https://github.com/ZUGFeRD/mustangproject
+  Maven Central org.mustangproject:Mustang-CLI:2.26.0, unverändert.
+  Das Jar bündelt u. a. (Lizenzangaben der Projekte, Hinweise im Jar unter META-INF\):
+  Apache PDFBox, ph-schematron/ph-commons/ph-cii, Jackson, Byte Buddy, Apache Commons,
+  AssertJ, XMLUnit, cglib                   Apache License 2.0
+  veraPDF                                   GPL-3.0-or-later oder MPL-2.0 (wahlweise)
+  Saxon-HE                                  MPL-2.0
+  Logback                                   EPL-1.0 oder LGPL-2.1 (wahlweise)
+  SLF4J                                     MIT
+  JAXB, Jakarta Activation, Eclipse Angus   BSD-3-Clause (EDL 1.0)
+  Janino, ASM, JSR-305                      BSD-3-Clause
+Eclipse Temurin 21 JRE 21.0.13+9 (Windows x64)
+                               GPL-2.0 mit Classpath Exception   https://adoptium.net
+  OpenJDK21U-jre_x64_windows_hotspot_21.0.13_9.zip, unverändert.
+  Lizenz und Hinweise: java\NOTICE und java\legal\<modul>\ (z. B. java\legal\java.base\LICENSE).
+  Quellcode: https://github.com/adoptium/jdk21u (jdk-21.0.13+9)
+
 Python und Python-Pakete (Ordner python\)
 -----------------------------------------
 Python 3.14 (Windows embeddable)  PSF License            python\LICENSE.txt

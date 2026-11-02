@@ -1,36 +1,54 @@
 # Prüfung der erzeugten E-Rechnungen
 
-Nur gm-claude. Echte Testdaten liegen in `/root/erechnung-testdaten/` (0700), nie im Repo.
+Ab 0.1.6 prüft die App **jede** Rechnung selbst mit Mustang (XSD + EN16931-Schematron), bevor sie im Ausgabeordner landet (Spezifikation 3.4). Diese Seite beschreibt die Prüfung in den Tests. Echte Testdaten liegen nur auf gm-claude in `/root/erechnung-testdaten/` (0700), nie im Repo.
+
+## Mustang lokal (gm-claude)
+
+Version und Prüfsummen stehen in `release/mustang.env`. Das Jar liegt in der Paketablage; einmal holen:
+
+```sh
+mkdir -p /root/.cache/mustang
+```
+
+```sh
+curl -fsSL -H "Authorization: token <Paket-Token>" -o /root/.cache/mustang/Mustang-CLI-2.26.0.jar https://git.gm-itsolutions.de/api/packages/gm-itsolutions/generic/mustang-cli/2.26.0/Mustang-CLI-2.26.0.jar
+```
+
+```sh
+sha256sum /root/.cache/mustang/Mustang-CLI-2.26.0.jar
+```
+
+Muss `MUSTANG_SHA256` aus `release/mustang.env` ergeben. Java 21 ist auf gm-claude installiert (`java` im PATH); die Tests finden Mustang über `MUSTANG_JAR`.
 
 ## Automatisch (pytest)
 
 ```sh
-ERECHNUNG_TESTDATEN=/root/erechnung-testdaten /root/.venvs/erechnung/bin/python -m pytest /root/erechnung-konverter/tests -q
+MUSTANG_JAR=/root/.cache/mustang/Mustang-CLI-2.26.0.jar ERECHNUNG_TESTDATEN=/root/erechnung-testdaten /root/.venvs/erechnung/bin/python -m pytest /root/erechnung-konverter/tests -q -rs
 ```
 
-`tests/test_lexware_echt.py` liest RE0146, RE0148, RE0149 über die Vorlage ein und prüft:
+- `tests/test_mustang.py`: Auswertung des Berichts mit ersetztem Aufruf (gültig, ungültig mit Regel-IDs, Fehlercode, kein Bericht, nicht startbar, Frist) und – wenn `java` und `MUSTANG_JAR` da sind – echte Mustang-Läufe auf synthetische Rechnungen (gültig, mit Rabatt gültig, falsche Summe → `BR-CO-15`).
+- `tests/test_ueberwachen.py`: Ablage nur nach gültiger Prüfung, Fehlerdatei bei ungültig oder fehlendem Mustang; `test_cli_umwandeln` läuft als eigener Prozess mit echtem Mustang (ohne Mustang: muss im Fehlerordner enden).
+- `tests/test_lexware_echt.py` (nur mit `ERECHNUNG_TESTDATEN`): RE0146, RE0148, RE0149, RE0158 über die Vorlage einlesen; Nummer, Netto, Steuer, Brutto und Positionsbeträge gleich der Lexware-XML, XSD gültig, **Mustang gültig** (`test_mustang_gueltig`). Die erzeugte XML landet zusätzlich in `/tmp/erechnung-pruefung/<nummer>.xml`.
 
-- Nummer, Netto, Steuer, Brutto und Positionsbeträge gleich der Lexware-XML,
-- erzeugte CII-XML gültig gegen das XSD (factur-x, Profil EN16931).
+Ohne `MUSTANG_JAR` werden die echten Mustang-Läufe übersprungen (`-rs` zeigt das). Die CI holt Mustang (und bei Bedarf die Linux-JRE) aus der Paketablage (`release/mustang_holen.sh`) und bricht ab, wenn Mustang nicht gefunden wird – dort wird also nie still übersprungen.
 
-Die erzeugte XML landet dabei in `/tmp/erechnung-pruefung/<nummer>.xml` (für Mustang, unten).
+**Schematron ohne Mustang:** factur-x bringt die EN16931-Schematron-Regeln nur als XSLT 2.0 mit; lxml kann nur XSLT 1.0. Deshalb Mustang.
 
-Ohne `ERECHNUNG_TESTDATEN` werden diese Tests übersprungen (CI).
-
-**Schematron:** factur-x bringt die EN16931-Schematron-Regeln mit, aber als XSLT 2.0; lxml kann nur XSLT 1.0, factur-x braucht dafür einen Saxon-Server. Den gibt es hier nicht – die Schematron-Prüfung deckt Mustang ab.
-
-## Offen: Mustang-Prüfung durch Marvin
-
-Pflicht vor jeder Freigabe (Spezifikation 12.1). Prüft XSD und EN16931-Schematron. Bisher nicht gelaufen, weil Mustang nicht automatisch heruntergeladen werden soll.
-
-1. **Bezugsquelle:** `Mustang-CLI-<v>.jar` der neuesten stabilen Version von https://github.com/ZUGFeRD/mustangproject/releases, Prüfsumme gegen Maven Central (`https://repo1.maven.org/maven2/org/mustangproject/Mustang-CLI/<v>/Mustang-CLI-<v>.jar.sha1`) vergleichen.
-2. **Ablage:** `/root/.cache/mustang/Mustang-CLI-<v>.jar` (außerhalb des Repos).
-3. **Befehl** (nach dem pytest-Lauf oben, je Rechnung):
+## Von Hand
 
 ```sh
-java -Xmx1g -jar /root/.cache/mustang/Mustang-CLI-<v>.jar --no-notices --action validate --source /tmp/erechnung-pruefung/RE0146.xml
+java -Xmx512m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -jar /root/.cache/mustang/Mustang-CLI-2.26.0.jar --no-notices --action validate --source /tmp/erechnung-pruefung/RE0146.xml
 ```
 
-Gültig, wenn der Bericht `status="valid"` enthält. Meldet Mustang eine fehlende Leitweg-ID (BR-DE-*), hat es als XRechnung statt EN16931 geprüft – kein Fehler für dieses Profil.
+Gültig, wenn der Bericht `<summary status="valid"/>` enthält und der Exit-Code 0 ist (ungültig: 255). Auf das ZUGFeRD-PDF angewandt meldet Mustang den PDF-Teil als `invalid`, weil das PDF kein PDF/A-3 ist (Abweichung A2) – deshalb prüft die App nur die XML.
 
-Danach kann `werkzeuge/pruefen.sh` aus Task 08 (Version und SHA-256 gepinnt) und der Ende-zu-Ende-Test nachgezogen werden.
+## Ergebnis 02.11.2026 (Mustang 2.26.0, Temurin 21.0.13 und OpenJDK 21.0.12)
+
+| Rechnung | XML | Regeln geprüft / verletzt | PDF (nur zur Info) |
+|---|---|---|---|
+| RE0146 | valid | 123 / 0 | PDF-Teil invalid (ISO 19005-3 6.8, kein PDF/A-3), XML valid |
+| RE0148 | valid | 72 / 0 | wie oben |
+| RE0149 | valid | 123 / 0 | wie oben |
+| RE0158 (Rabatt) | valid | 82 / 0 | wie oben |
+
+Keine Warnungen oder Hinweise im Bericht. `cii.py` musste nicht geändert werden.

@@ -2,7 +2,7 @@
 
 ## Zweck
 
-Einrichtung, Prüfung, Pflege und Rückbau des E-Rechnung-Konverters auf einem Windows-PC des Kunden. Nach der Einrichtung gibt es den Drucker **E-Rechnung**: Was darauf gedruckt wird, landet als ZUGFeRD-E-Rechnung (EN16931) mit XML in `C:\E-Rechnung\E-Rechnungen`. Updates kommen signiert über gm-update. Hintergrund: `docs/spezifikation.md` (Abschnitte 3, 6, 7, 9).
+Einrichtung, Prüfung, Pflege und Rückbau des E-Rechnung-Konverters auf einem Windows-PC des Kunden. Nach der Einrichtung gibt es den Drucker **E-Rechnung**: Was darauf gedruckt wird, landet als ZUGFeRD-E-Rechnung (EN16931, XML im PDF eingebettet) in `C:\E-Rechnung\E-Rechnungen`, vorher mit Mustang geprüft. Updates kommen signiert über gm-update. Hintergrund: `docs/spezifikation.md` (Abschnitte 3, 6, 7, 9).
 
 | Was | Wo |
 |---|---|
@@ -48,6 +48,7 @@ Den Hash mit dem Eintrag `gm-update-0.1.4-windows-amd64.exe` in der **freigegebe
 - Pflicht: `verkaeufer.name`, `ust_id` **oder** `steuernummer`, `iban`. Übrige Felder (`strasse`, `plz`, `ort`, `land`, `email`, `bic`) so vollständig wie möglich, sie gehen in die E-Rechnung.
 - Im Block `verkaeufer` nur diese Felder, keine Kommentar- oder Zusatzfelder (sonst startet der Überwacher nicht).
 - Die vier Ordnerpfade setzt `einrichten.ps1` aus `-Daten`; Werte in der Datei werden überschrieben.
+- Optional `"xml_einzeln": true` (oberste Ebene, nicht im Block `verkaeufer`): zusätzlich `<Nummer>.xml` in `E-Rechnungen`, z. B. wenn der Kunde Behörden über ein XRechnung-Portal beliefert. Standard (Schlüssel fehlt oder `false`): nur `<Nummer>.pdf`. Nachträglich ändern: `konfig.json` im Programmordner als Administrator bearbeiten, dann Aufgabe `E-Rechnung` stoppen und starten (wie Schritt 4).
 - Datei als UTF-8 speichern. Keine Zugangsdaten hinein.
 
 ### 2. Einrichten
@@ -89,9 +90,9 @@ Get-Printer -Name 'E-Rechnung' | Format-List Name, DriverName, PortName
 ```
 
 - `stand.json`: `version` gesetzt, `fehler` leer.
-- Testdruck: eine Rechnung aus dem Programm des Kunden auf **E-Rechnung** drucken, angemeldet als Benutzer. Nicht als SYSTEM (RMM-Shell, geplante Aufgabe als SYSTEM): Dann bleibt der Auftrag mit „Fehler – Wird gedruckt“ in der Warteschlange hängen, es entsteht keine Datei, der Drucker steht auf Fehler. Solche Aufträge mit `Get-PrintJob -PrinterName 'E-Rechnung' | Remove-PrintJob` löschen. Der Spooler schreibt die Datei im Kontext des druckenden Benutzers (Besitzer der Datei ist der Benutzer), deshalb brauchen Benutzer in `Eingang` das Recht Ändern. Nach wenigen Sekunden liegen `<Rechnungsnummer>.pdf` und `.xml` in `C:\E-Rechnung\E-Rechnungen`, das Original in `Originale`.
+- Testdruck: eine Rechnung aus dem Programm des Kunden auf **E-Rechnung** drucken, angemeldet als Benutzer. Nicht als SYSTEM (RMM-Shell, geplante Aufgabe als SYSTEM): Dann bleibt der Auftrag mit „Fehler – Wird gedruckt“ in der Warteschlange hängen, es entsteht keine Datei, der Drucker steht auf Fehler. Solche Aufträge mit `Get-PrintJob -PrinterName 'E-Rechnung' | Remove-PrintJob` löschen. Der Spooler schreibt die Datei im Kontext des druckenden Benutzers (Besitzer der Datei ist der Benutzer), deshalb brauchen Benutzer in `Eingang` das Recht Ändern. Nach wenigen Sekunden (Mustang-Prüfung rund 3–8 s) liegt `<Rechnungsnummer>.pdf` in `C:\E-Rechnung\E-Rechnungen` (mit `xml_einzeln` zusätzlich `.xml`), das Original in `Originale`. Im Log steht je Rechnung `Mustang: valid, Profil urn:cen.eu:en16931:2017, … 0 verletzt`, beim Start „Mustang: …\java\bin\java.exe …\Mustang-CLI-2.26.0.jar“.
 - Senden an: als Benutzer im Explorer Rechtsklick auf eine Lexware-PDF → **Senden an → E-Rechnung**. Ergebnis wie beim Druck; die Datei im Ausgangsordner des Benutzers sollte erhalten bleiben (Explorer kopiert; auf VM 108 noch zu bestätigen).
-- Texterkennung: eine Rechnung aus **Edge** auf **E-Rechnung** drucken (Edge druckt PDFs als Bild). Nach etwa 10 s je Seite liegen `<Nummer>.pdf`, `.xml` und `<Nummer>.ocr.txt` (Hinweis + erkannter Text) in `E-Rechnungen`; im Log steht „per Texterkennung gelesen“ und beim Start „Texterkennung: …\tesseract.exe“.
+- Texterkennung: eine Rechnung aus **Edge** auf **E-Rechnung** drucken (Edge druckt PDFs als Bild). Nach etwa 10 s je Seite liegt `<Nummer>.pdf` in `E-Rechnungen`; der Vermerk `<stempel>-<name>.ocr.txt` (Hinweis + erkannter Text) liegt neben dem Original in `Originale` und steht auch im Log, dazu „per Texterkennung gelesen“ und beim Start „Texterkennung: …\tesseract.exe“.
 - Log: `%ProgramFiles%\GM-IT\erechnung-konverter\erechnung.log` (je Datei Eingang, Vorlage, Ergebnis/Fehler), gm-update: `gm-update.log` daneben.
 
 ### 4. Neue Vorlage ohne Release
@@ -119,6 +120,8 @@ Fehler stehen je Datei in `C:\E-Rechnung\Fehler\<stempel>-<name>.fehler.txt`, da
 | zu viele Seiten für die Texterkennung | Bild-PDF mit mehr als 20 Seiten | Original-PDF mit Text übergeben |
 | Summenfehler (z. B. „Netto: Positionen … ≠ Rechnung …“) | Vorlage liest einen Betrag falsch oder die Rechnung ist rechnerisch falsch | PDF prüfen; Rechnung korrigieren oder Vorlage anpassen. Es entsteht bewusst keine E-Rechnung |
 | PDF unvollständig | Druckauftrag abgebrochen | Erneut drucken |
+| E-Rechnung laut Mustang ungültig, darunter Zeilen wie `BR-CO-15: …` | Die erzeugte XML verletzt eine EN16931-Regel (Regel-ID und Text stehen in der Fehlerdatei). Es entsteht bewusst keine E-Rechnung | PDF und Fehlerdatei an GM IT; Ursache liegt in Vorlage oder Konverter (`cii.py`), nicht beim Kunden |
+| Mustang-Prüfung nicht verfügbar / Mustang nicht startbar / Frist 60 s überschritten / Mustang-Prüfung ohne Bericht | `aktuell\java\` oder `aktuell\mustang\` fehlt oder ist beschädigt, Java startet nicht (Speicher, Virenscanner), PC stark ausgelastet | `erechnung.log` (Startzeile „Mustang: …“); als Administrator `& "$env:ProgramFiles\GM-IT\erechnung-konverter\aktuell\java\bin\java.exe" -version`. Danach PDF aus `Fehler` erneut nach `Eingang` |
 | Nichts passiert, `pythonw` läuft nicht | Überwacher beendet oder App fehlt | `erechnung.log` lesen; fehlt `aktuell` im Programmordner: `stand.json` und `gm-update.log` lesen (keine Freigabe, Token, Netz). Aufgabe startet einen beendeten Überwacher binnen 5 Min. neu |
 | `stand.json`: „… übersprungen bis zu einer höheren Freigabe“ | Probe der neuen Version gescheitert, gm-update blieb auf der vorigen | Ursache im `gm-update.log`, Fehler beheben, höhere Version freigeben |
 

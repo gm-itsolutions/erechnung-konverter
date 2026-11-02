@@ -5,7 +5,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Callable
-from . import ocr
+from . import mustang, ocr
 from .cii import bette_ein, erzeuge_cii
 from .modell import Partei, SummenFehler, summenabgleich
 from .vorlagen import OCR_HINWEIS, STANDARD, lade_vorlagen, lies_rechnung
@@ -20,15 +20,19 @@ class Konfig:
     verkaeufer: Partei
     vorlagen: list[dict]
     ocr: Callable[[Path], str] | None = None   # Texterkennung für PDFs ohne Text
+    pruefe: Callable[[Path], str] | None = None   # Mustang (XML → Kurzbericht, ValueError wenn ungültig); None → Fehler
+    xml_einzeln: bool = False                  # zusätzlich <Nummer>.xml in den Ausgabeordner (Behörden, XRechnung)
 def lade_konfig(datei: Path) -> Konfig:
     d = json.loads(datei.read_text(encoding="utf-8-sig"))  # PowerShell schreibt gern mit BOM
     v = Partei(**d["verkaeufer"])
     if not (v.name and (v.ust_id or v.steuernummer) and v.iban):
         raise ValueError("konfig.json: verkaeufer braucht name, ust_id oder steuernummer und iban")
-    arbeit, aufruf = datei.parent / "arbeit", ocr.tesseract()
+    arbeit, aufruf, pruefer = datei.parent / "arbeit", ocr.tesseract(), mustang.mustang()
     return Konfig(Path(d["eingang"]), Path(d["ausgabe"]), Path(d["originale"]), Path(d["fehler"]),
                   arbeit, v, lade_vorlagen(STANDARD, datei.parent / "vorlagen"),
-                  partial(ocr.erkenne, arbeit=arbeit, aufruf=aufruf) if aufruf else None)
+                  partial(ocr.erkenne, arbeit=arbeit, aufruf=aufruf) if aufruf else None,
+                  partial(mustang.pruefe, aufruf=pruefer) if pruefer else None,
+                  d.get("xml_einzeln") is True)
 def pruefe_ordner(k: Konfig) -> None:
     """Keine Junction/Symlink, alles auf einem Laufwerk (os.replace), Arbeitsordner anlegen."""
     k.arbeit.mkdir(exist_ok=True)
@@ -57,18 +61,30 @@ def verarbeite(pdf: Path, k: Konfig) -> Path:
     xml = erzeuge_cii(r, steuern)
     zugferd = bette_ein(pdf.read_bytes(), xml)  # Sichtkomponente bleibt das Original (bei OCR das Bild-PDF)
     tmp_pdf, tmp_xml = pdf.parent / (pdf.name + ".out.pdf"), pdf.parent / (pdf.name + ".out.xml")
-    tmp_xml.write_bytes(xml)
-    tmp_pdf.write_bytes(zugferd)
-    basis = _frei(k.ausgabe, re.sub(r"[^A-Za-z0-9._-]", "_", r.nummer), ".pdf", ".xml", ".ocr.txt")
+    try:
+        tmp_xml.write_bytes(xml)
+        tmp_pdf.write_bytes(zugferd)
+        if not k.pruefe:
+            raise ValueError("Mustang-Prüfung nicht verfügbar (java oder Mustang-CLI fehlt im Programmordner), "
+                             "keine E-Rechnung abgelegt")
+        # XML statt PDF: das PDF des Kunden ist kein PDF/A-3, Mustang meldet den PDF-Teil immer ungültig (Abweichung A2)
+        log.info("%s: Mustang: %s", pdf.name, k.pruefe(tmp_xml))
+        basis = _frei(k.ausgabe, re.sub(r"[^A-Za-z0-9._-]", "_", r.nummer), ".pdf", ".xml")
+        if k.xml_einzeln:
+            os.replace(tmp_xml, k.ausgabe / f"{basis}.xml")
+        os.replace(tmp_pdf, k.ausgabe / f"{basis}.pdf")
+    finally:
+        tmp_xml.unlink(missing_ok=True)
+        tmp_pdf.unlink(missing_ok=True)
+    orig = _frei(k.originale, pdf.stem, ".pdf", ".ocr.txt")
     if r.ocr_text:
-        tmp_txt = pdf.parent / (pdf.name + ".out.txt")
-        tmp_txt.write_text(f"{basis}: {OCR_HINWEIS} (Tesseract), das PDF enthielt keinen Text.\n"
-                           "Beträge durch den Summenabgleich geprüft. Rechnungsnummer, Daten und Käufer gegen das PDF prüfen.\n\n"
-                           f"--- erkannter Text ---\n{r.ocr_text}\n", encoding="utf-8")
-        os.replace(tmp_txt, k.ausgabe / f"{basis}.ocr.txt")
-    os.replace(tmp_xml, k.ausgabe / f"{basis}.xml")
-    os.replace(tmp_pdf, k.ausgabe / f"{basis}.pdf")
-    os.replace(pdf, k.originale / f"{_frei(k.originale, pdf.stem, '.pdf')}.pdf")
+        vermerk = (f"{basis}: {OCR_HINWEIS} (Tesseract), das PDF enthielt keinen Text.\n"
+                   "Beträge durch den Summenabgleich geprüft. Rechnungsnummer, Daten und Käufer gegen das PDF prüfen.\n\n"
+                   f"--- erkannter Text ---\n{r.ocr_text}\n")
+        with open(k.originale / f"{orig}.ocr.txt", "x", encoding="utf-8") as f:
+            f.write(vermerk)
+        log.info("%s: %s", pdf.name, vermerk)
+    os.replace(pdf, k.originale / f"{orig}.pdf")
     log.info("%s → %s (Vorlage %s%s)", pdf.name, basis, r.vorlage, f", {OCR_HINWEIS}" if r.ocr_text else "")
     return k.ausgabe / f"{basis}.pdf"
 def bearbeite(pdf: Path, k: Konfig) -> tuple[bool, str]:
@@ -102,8 +118,11 @@ def ueberwache(k: Konfig, takt: float = 0.5) -> None:
         rest.unlink()
     for rest in list(k.arbeit.glob("ocr-*")):
         shutil.rmtree(rest, ignore_errors=True)
-    log.info("Überwachung gestartet: %s (Texterkennung: %s)", k.eingang,
-             k.ocr.keywords["aufruf"][0] if isinstance(k.ocr, partial) else "nicht verfügbar")
+    log.info("Überwachung gestartet: %s (Texterkennung: %s, Mustang: %s, XML einzeln: %s)", k.eingang,
+             k.ocr.keywords["aufruf"][0] if isinstance(k.ocr, partial) else "nicht verfügbar",
+             " ".join(a for i, a in enumerate(k.pruefe.keywords["aufruf"]) if i == 0 or a.endswith(".jar"))
+             if isinstance(k.pruefe, partial) else "NICHT VERFÜGBAR, jede Rechnung geht nach Fehler",
+             "ja" if k.xml_einzeln else "nein")
     while True:
         try:
             schritt(k)

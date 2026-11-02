@@ -6,7 +6,7 @@
 
 **Architecture:** Python-Paket `erechnung` (pdfplumber → YAML-Regex-Vorlage → `Decimal`-Modell mit Pflicht-Summenabgleich → CII-XML mit lxml → factur-x). Läuft als geplante Aufgabe (SYSTEM) mit Windows-Embeddable-Python 3.14; das ZIP baut die Forgejo-CI auf Linux, gm-update verteilt es signiert.
 
-**Tech Stack:** Python 3.14, pdfplumber, lxml, factur-x 7.9, pyyaml, pytest (+ reportlab nur für Tests), PowerShell 5.1, gm-update 0.1.4, Mustang-CLI (nur gm-claude).
+**Tech Stack:** Python 3.14, pdfplumber, lxml, factur-x 7.9, pyyaml, pytest (+ reportlab nur für Tests), PowerShell 5.1, gm-update 0.1.4, Mustang-CLI 2.26.0 mit Temurin-JRE 21 (ab 0.1.6 im Paket, Prüfung jeder Rechnung).
 
 **Spec:** `docs/spezifikation.md`
 
@@ -38,7 +38,7 @@
 | 05 | `task-05-ueberwacher.md` | Überwacher, Konfiguration, CLI | Subagent | 60 Min. | 03, 04 | erledigt (main fbc7e50 + task-08) |
 | 06 | `task-06-paket-ci.md` | CI (Tests, Paket), Windows-ZIP, Release-CI | Subagent | 60 Min. | 01 | erledigt (main fbc7e50 + task-08) |
 | 07 | `task-07-einrichtung.md` | `einrichten.ps1`, `gm-update.json`, Runbook | Subagent | 45 Min. | – | erledigt (main fbc7e50 + task-08) |
-| 08 | `task-08-pruefung.md` | Mustang-Prüfung, Echt-Tests gegen Lexware-XML | Subagent | 30 Min. | 02, 05 | erledigt ohne Mustang (offen: Marvin, docs/pruefung.md) |
+| 08 | `task-08-pruefung.md` | Mustang-Prüfung, Echt-Tests gegen Lexware-XML | Subagent | 30 Min. | 02, 05 | erledigt; Mustang nachgezogen in 0.1.6 (docs/pruefung.md) |
 | 09 | `task-09-release-010.md` | Tag `v0.1.0`, CI grün, Artefakt prüfen | Claude (Hauptsitzung) | 15 Min. | 06, 07, 08 | erledigt (v0.1.0, ZIP d50ebcdc…) |
 | 10 | `task-10-vm-test-app.md` | VM 108: Einrichtung und Druck ohne Freigabe | Subagent | 90 Min. | 09 | erledigt 02.11.2026 (docs/testprotokoll.md) |
 | 11 | `task-11-freigabe-010.md` | Freigabe `v0.1.0` per YubiKey | **Marvin** | 5 Min. | 09 | erledigt (Marvin, 02.11.2026) |

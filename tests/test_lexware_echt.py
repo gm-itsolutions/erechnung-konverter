@@ -8,7 +8,7 @@ import pytest
 from decimal import Decimal as D
 from facturx import xml_check_xsd
 from lxml import etree
-from erechnung import ocr
+from erechnung import mustang, ocr
 from erechnung.betraege import betraege
 from erechnung.cii import erzeuge_cii
 from erechnung.modell import summenabgleich
@@ -40,6 +40,14 @@ def test_xsd_gueltig(nummer):
     (AUSGABE / f"{nummer}.xml").write_bytes(xml)
     assert xml_check_xsd(xml, flavor="factur-x", level="en16931")
     assert betraege(xml) == betraege((Path(DATEN) / f"{nummer}.lexware.xml").read_bytes())
+
+@pytest.mark.skipif(not mustang.mustang(), reason="java oder Mustang-CLI (MUSTANG_JAR) fehlt")
+@pytest.mark.parametrize("nummer", NUMMERN)
+def test_mustang_gueltig(nummer, tmp_path):
+    """Mustang (XSD + EN16931-Schematron) auf die erzeugte XML, wie in der App."""
+    r = lies_rechnung(Path(DATEN) / f"{nummer}.pdf", lade_vorlagen(STANDARD), VERKAEUFER)
+    (tmp_path / f"{nummer}.xml").write_bytes(erzeuge_cii(r, summenabgleich(r)))
+    assert "0 verletzt" in mustang.pruefe(tmp_path / f"{nummer}.xml", mustang.mustang())
 
 def _lexware(nummer):
     return etree.parse(str(Path(DATEN) / f"{nummer}.lexware.xml"))

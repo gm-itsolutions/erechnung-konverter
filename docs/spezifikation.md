@@ -1,6 +1,6 @@
 # erechnung-konverter – Spezifikation
 
-- **Stand:** 02.11.2026, Version 1 (Durchstich für den Kundentermin am 03.11.2026); Ergänzung 02.11.2026: Senden an (3.3), Texterkennung (3.2)
+- **Stand:** 02.11.2026, Version 1 (Durchstich für den Kundentermin am 03.11.2026); Ergänzung 02.11.2026: Senden an (3.3), Texterkennung (3.2); 0.1.6: nur ZUGFeRD-PDF im Ausgabeordner, Mustang-Prüfung jeder Rechnung (3.4)
 - **Projekt:** ai-os `30-projekte/erechnung-konverter.md`, Teilprojekt 2 von gm-update
 - **Repo:** `git.gm-itsolutions.de/gm-itsolutions/erechnung-konverter` (privat), Klon `/root/erechnung-konverter`
 - **Plan:** `docs/plan/index.md`
@@ -9,11 +9,11 @@
 
 Marvin, wörtlich: „dass man eine blanke Rechnung als PDF drucken kann zum E-Rechnungs-Dienst und die E-Rechnung rauskommt“.
 
-Ein Windows-PC hat einen Drucker **„E-Rechnung“**. Wer darauf eine Rechnung druckt, findet kurz danach im Ordner `E-Rechnungen` zwei Dateien:
-- `<Rechnungsnummer>.pdf`: ZUGFeRD-PDF mit eingebetteter CII-XML, Profil EN16931
-- `<Rechnungsnummer>.xml`: dieselbe XML einzeln
+Ein Windows-PC hat einen Drucker **„E-Rechnung“**. Wer darauf eine Rechnung druckt, findet kurz danach im Ordner `E-Rechnungen` die E-Rechnung:
+- `<Rechnungsnummer>.pdf`: ZUGFeRD-PDF mit eingebetteter CII-XML, Profil EN16931 (ab 0.1.6 die einzige Datei)
+- `<Rechnungsnummer>.xml`: dieselbe XML einzeln, **nur** mit `"xml_einzeln": true` in `konfig.json` (z. B. für Behörden/XRechnung-Portale, die eine reine XML wollen)
 
-Passen die Summen nicht oder ist das Layout unbekannt, entsteht **keine** E-Rechnung. Das Original kommt dann mit einer Fehlerdatei samt Grund in den Ordner `Fehler`.
+Jede E-Rechnung wird vor dem Ablegen mit Mustang geprüft (XSD + EN16931-Schematron, 3.4). Passen die Summen nicht, ist das Layout unbekannt oder ist die XML laut Mustang ungültig, entsteht **keine** E-Rechnung. Das Original kommt dann mit einer Fehlerdatei samt Grund in den Ordner `Fehler`.
 
 Getestet wird mit Marvins Lexware-Rechnungen. Das Layout von Prignitz Markt folgt nach dem Termin als **weitere Vorlage** (eine YAML-Datei, kein Code).
 
@@ -22,7 +22,7 @@ Getestet wird mit Marvins Lexware-Rechnungen. Das Layout von Prignitz Markt folg
 | Enthalten | Nicht enthalten (offen, Abschnitt 11) |
 |---|---|
 | Rechnung (Typ 380), EUR, Umsatzsteuer Kategorie S (z. B. 19 % und 7 %, auch gemischt), Rabatt auf Rechnungsebene (Betrag) | Gutschrift, Storno, Abschlag, Prozent-Rabatt, Rabatt/Zuschlag je Position, steuerfrei/Reverse Charge (§ 13b), Kleinunternehmer |
-| ZUGFeRD-PDF (EN16931) + XML, XSD-Prüfung | PDF/A-3 (Ghostscript), XRechnung-Syntax mit Leitweg-ID |
+| ZUGFeRD-PDF (EN16931), XML einzeln optional; XSD- und Mustang-Prüfung (EN16931-Schematron) je Rechnung | PDF/A-3 (Ghostscript), XRechnung-Syntax mit Leitweg-ID |
 | Vorlage je Layout (YAML) | Empfang/Prüfung eingehender E-Rechnungen |
 | Installation und Update über gm-update | Versand per Mail, Monitoring-Anbindung |
 
@@ -38,7 +38,8 @@ Programm des Kunden ── druckt ──> Drucker "E-Rechnung" (Microsoft Print 
   3. Verkäuferdaten aus konfig.json ergänzen
   4. Summenabgleich (Pflicht) ── Fehler ──> Fehler\<stempel>-<name>.pdf + .fehler.txt
   5. CII-XML (EN16931) bauen, XSD prüfen, mit factur-x ins PDF einbetten
-  6. E-Rechnungen\<Nummer>.pdf + .xml, Original nach Originale\
+  6. Mustang prüft die XML (XSD + EN16931-Schematron) ── ungültig/Frist/nicht startbar ──> Fehler\ (wie 4.)
+  7. E-Rechnungen\<Nummer>.pdf (+ .xml nur mit xml_einzeln), Original nach Originale\ (bei OCR + .ocr.txt)
 ```
 
 ### 3.1 Drucker und Port
@@ -60,7 +61,7 @@ Ein Programm, das Text als Text druckt (GDI, Office, `Out-Printer`), liefert ein
    - `tesseract.exe <bild> <ausgabe> -l deu --psm 6 --dpi 300` per `subprocess` ohne Shell, ohne Konsolenfenster, Frist 120 s je Seite. Bilder und Text in einem temporären Ordner `ocr-*` im Arbeitsordner der App, danach gelöscht (Reste beim Start des Überwachers).
    - Text bereinigen: Tabellenrahmen `|`, doppelte Leerzeichen, Leerzeilen. **Ziffern werden nie geändert.**
    - Danach dieselbe Vorlagenlogik und derselbe Pflicht-Summenabgleich. Jeder Fehler endet mit „(per Texterkennung gelesen)“ in der Fehlerdatei.
-   - Erfolg: Die E-Rechnung bettet die XML in das **Original-PDF (Bild)** ein, es bleibt die Sichtkomponente. Daneben `<Nummer>.ocr.txt` mit Hinweis und erkanntem Text; im Log „per Texterkennung gelesen“.
+   - Erfolg: Die E-Rechnung bettet die XML in das **Original-PDF (Bild)** ein, es bleibt die Sichtkomponente. Der Vermerk (Hinweis und erkannter Text) liegt ab 0.1.6 **neben dem Original** als `Originale\<stempel>-<name>.ocr.txt` und steht im Log; der Ausgabeordner enthält nur die E-Rechnung. Im Log zusätzlich „per Texterkennung gelesen“.
    - Tesseract fehlt (z. B. Entwicklung ohne Tesseract): Fehler „kein Text im PDF …, Texterkennung nicht verfügbar“.
    - **Grenze:** Der Summenabgleich sichert die Beträge, nicht Nummer, Daten und Käufer. Deshalb in der Vorlage: Nummer nur `RE\d+` und eine zweite Fundstelle (`nummer_kontrolle`, Überschrift „Rechnung RE…“) muss übereinstimmen; `O` statt `0` wird nur in Datumsangaben ersetzt. Mit `tessdata_fast` las Tesseract bei zwei von drei echten Rechnungen „REO0146“ statt „RE0146“ (beide Fundstellen gleich falsch) – darum `tessdata_best` (4.1) und das enge Nummernmuster, das so einen Fall zum Fehler macht.
 
@@ -72,6 +73,21 @@ Ergebnis auf gm-claude (Tesseract 5.5.0, `tessdata_best`): Die drei echten Lexwa
 
 Halb kopierte Dateien: Der Explorer schreibt die Zieldatei unter ihrem endgültigen Namen und hält sie bis zum Ende offen (CopyFileEx, ohne `FILE_SHARE_DELETE` **[auf VM prüfen]**). `os.replace` scheitert dann wie beim Spooler mit einer Freigabeverletzung, der nächste Takt versucht es erneut. Greift das nicht, fehlt am Dateiende `%%EOF` (CopyFileEx legt die Zielgröße vorab an, das Ende ist noch leer) → Fehlerdatei „PDF unvollständig“; die Quelldatei des Benutzers bleibt unberührt. Ob „Senden an“ auf demselben Laufwerk kopiert oder verschiebt, ist **[auf VM prüfen]** (erwartet: kopieren). Namenskollisionen: Arbeitsdateien bekommen einen Zeitstempel mit Mikrosekunden, Ziele in `E-Rechnungen`, `Originale`, `Fehler` ein `-2`, `-3` … (`_frei`).
 
+### 3.4 Mustang-Prüfung jeder Rechnung (ab 0.1.6)
+
+Nach dem Einbetten und **vor** dem Ablegen ruft `erechnung/mustang.py` die Mustang-CLI auf:
+
+```
+java\bin\java.exe -Xmx512m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -jar mustang\Mustang-CLI-2.26.0.jar --no-notices --action validate --source <arbeit>\<datei>.out.xml
+```
+
+- **Geprüft wird die XML, nicht das PDF.** Auf das fertige ZUGFeRD-PDF angewandt, meldet Mustang 2.26.0 den PDF-Teil (veraPDF, PDF/A-3b) immer als `invalid`: bei den Lexware-PDFs nur ISO 19005-3 6.8 (eingebettete Datei ohne `AFRelationship`-Verknüpfung), bei PDFs ohne PDF/A (Microsoft Print to PDF, reportlab) zusätzlich nicht eingebettete Schriften und DeviceGray ohne OutputIntent. Das ist die bekannte Abweichung A2 (kein PDF/A-3). Die Gesamtbewertung bleibt zwar `valid`, solange die XML gültig ist, darauf baut die App aber nicht; die XML-Prüfung allein ist eindeutig, unabhängig vom Druckweg und spart rund 3 s je Rechnung (XML 2,5–3 s, PDF 6–7 s auf gm-claude). Die XML ist byteidentisch mit der eingebetteten (`get_xml_from_pdf`, Test `test_erfolg`).
+- **Auswertung:** Bericht auf stdout (`<validation>`). `summary/@status = valid` **und** Exit-Code 0 → ablegen, Kurzbericht ins Log (`Mustang: valid, Profil …, <n> Regeln, 0 verletzt, Mustang 2.26.0, <ms> ms`). Sonst Fehlerdatei mit „E-Rechnung laut Mustang ungültig“ und höchstens 10 Meldungen als `<Regel-ID>: <Text>` (z. B. `BR-CO-15: Invoice total amount with VAT (BT-112) = …`), nichts im Ausgabeordner.
+- **Kein stilles Ablegen:** Fehlt `java\` oder `mustang\` (bzw. in der Entwicklung `java` im PATH und `MUSTANG_JAR`), startet Mustang nicht oder überschreitet es die **Frist von 60 s**, endet die Rechnung im Ordner `Fehler`. Der Überwacher meldet beim Start „Mustang: NICHT VERFÜGBAR“.
+- Aufruf gekapselt (`mustang.mustang()` liefert den Aufruf, `mustang.pruefe(xml, aufruf)`); `Konfig.pruefe` ist in den Tests ersetzbar. Ohne Konsolenfenster (`CREATE_NO_WINDOW`), ohne Shell. Temporäre Dateien `*.out.pdf/.out.xml` im Arbeitsordner werden auch im Fehlerfall gelöscht.
+- **Laufzeit:** gemessen auf gm-claude mit Temurin 21.0.13: 2,7–3,0 s je Rechnung (JVM-Start + Schematron), 130 MB Speicher. Mit den JVM-Schaltern (C1-Compiler, Serial-GC) rund 40 % schneller als mit Standardeinstellungen (4,1 s, 195 MB). Auf einem Büro-PC sind 3–8 s zu erwarten **[auf VM prüfen]**.
+- Ergebnis echte Rechnungen (02.11.2026): RE0146, RE0148, RE0149, RE0158 → `valid`, 0 Regeln verletzt (72–123 Regeln geprüft). An `cii.py` war nichts zu ändern.
+
 ## 4. Komponenten
 
 | Datei | Aufgabe |
@@ -81,12 +97,14 @@ Halb kopierte Dateien: Der Explorer schreibt die Zieldatei unter ihrem endgülti
 | `erechnung/modell.py` | Datenklassen `Partei`, `Position`, `Rechnung`; `betrag()`, `datum()`; `summenabgleich()` |
 | `erechnung/vorlagen.py` | `pdf_text()`, `lade_vorlagen()`, `finde_vorlage()`, `lies_rechnung(…, ocr=None)` |
 | `erechnung/ocr.py` | `tesseract()` (Aufruf finden), `erkenne(pdf, arbeit, aufruf)`, `bereinige()` |
+| `erechnung/mustang.py` | `mustang()` (Aufruf finden: Paket `java\` + `mustang\`, sonst `java` aus PATH + `MUSTANG_JAR`), `pruefe(xml, aufruf)` (3.4) |
 | `erechnung/cii.py` | `erzeuge_cii()` (CII-XML, EN16931); Nachlass/Zuschlag als Kopf-`SpecifiedTradeAllowanceCharge` mit Steuersatz, `LineTotalAmount` = Σ Positionen, `Charge-`/`AllowanceTotalAmount`, `TaxBasisTotalAmount` = Netto (wie Lexware RE0158) |
 | `erechnung/ueberwachen.py` | `Konfig`, `lade_konfig()`, `verarbeite()`, `schritt()`, `ueberwache()` |
 | `erechnung/vorlagen/*.yml` | eine Vorlage je Layout |
-| `release/bauen.sh`, `release/requirements-windows.txt` | Windows-ZIP auf Linux bauen |
+| `release/bauen.sh`, `release/requirements-windows.txt`, `release/mustang.env` | Windows-ZIP auf Linux bauen; `mustang.env`: Versionen und SHA-256 von Mustang-CLI und Temurin-JRE |
+| `release/mustang_holen.sh` | CI: Mustang-CLI und (ohne Java im Job-Image) Linux-JRE aus der Paketablage |
 | `einrichten/einrichten.ps1`, `einrichten/gm-update.json`, `einrichten/konfig.beispiel.json` | Einrichtung beim Kunden |
-| `werkzeuge/` | nur gm-claude: Testdaten holen, Abgleich mit Lexware-XML, Mustang |
+| `werkzeuge/` | nur gm-claude: Testdaten holen |
 
 ### 4.1 Technische Entscheidungen
 
@@ -101,7 +119,8 @@ Halb kopierte Dateien: Der Explorer schreibt die Zieldatei unter ihrem endgülti
 | `pythonw.exe` als Aufgabe | kein Konsolenfenster. |
 | Programm- und Konfigurationsdateien unter `%ProgramFiles%\GM-IT\erechnung-konverter` | wie gm-update: Benutzer können dort nichts vorab anlegen. `konfig.json`, `arbeit\` und `erechnung.log` liegen neben `versionen\`, ein Update ersetzt sie nicht. |
 | Stopp/Start über PowerShell `Stop-/Start-ScheduledTask` statt `schtasks /End` | Scheitert `stopp`, verwirft gm-update die neue Version. `schtasks /End` meldet bei nicht laufender Aufgabe womöglich einen Fehler **[n. o. b.]**; `Stop-ScheduledTask` ist dann still. Auf der VM geprüft (Task 10). |
-| Validierung mit **Mustang-CLI** auf gm-claude (Java 21 vorhanden), in der CI nur XSD über factur-x | Mustang prüft XSD **und** EN16931-Schematron. Der CI-Runner hat kein Java; Mustang je Lauf zu laden lohnt nicht. Mustang-Lauf ist Teil von Task 8 und vor jeder Freigabe. |
+| **Mustang-CLI 2.26.0** im Paket, Prüfung jeder Rechnung (ab 0.1.6, Freigabe Marvin 02.11.2026) | Mustang prüft XSD **und** EN16931-Schematron (factur-x kann das Schematron nur mit Saxon-Server). Neueste Version auf Maven Central (`maven-metadata.xml`, release 2.26.0, 25.08.2026). In der CI prüfen die Tests synthetische Rechnungen mit derselben Mustang-Version, auf gm-claude zusätzlich die echten. |
+| **Eclipse Temurin 21 JRE** (21.0.13+9, LTS) unverändert als ZIP, **kein jlink** | Geprüft 02.11.2026: `jdeps` nennt 8 Module, ein jlink-Abbild mit 14 Modulen (`--strip-debug --compress=zip-6`) läuft und validiert korrekt, ist aber nur 11 MB kleiner im ZIP (38 statt 49 MB; entpackt 58 statt 146 MB). Dafür bräuchte der Bau das Windows-JDK (jmods, ~190 MB zusätzlich gespiegelt) und ein Linux-jlink exakt gleicher Version; das Ergebnis wäre ein selbst gebautes Abbild statt des signierten Adoptium-Artefakts (Prüfsumme nicht mehr gegen Adoptium vergleichbar, Byte-Reproduzierbarkeit von jlink nicht belegt) und jdeps erkennt per Reflexion geladene Module nicht sicher. Lohnt sich nicht. |
 | **Tesseract 5.5.3 aus conda-forge (win-64)** statt UB-Mannheim-Installer | conda-forge: jede Datei (`.conda`) mit SHA-256 aus der Repodata, auf Linux mit der Python-Standardbibliothek entpackbar (zip + `tarfile` mit zstd, Python 3.14), Abhängigkeiten reproduzierbar aufgelöst (py-rattler) und in `release/tesseract-windows.txt` fest gepinnt. Der UB-Mannheim-Installer ist ein NSIS-Setup (7z im CI nötig), bündelt seine DLLs ohne einzelne Prüfsummen und hat keine von uns prüfbare Herkunftskette außer dem Hash der Gesamtdatei. `libarchive` in der lgpl-Variante (die gpl-Variante zieht lzo, GPL-2.0). Ins Paket kommt nur die Importhülle von `tesseract.exe` (31 Dateien, mit objdump bestimmt; `conda_entpacken.py` bricht ab, wenn eine fehlt) plus alle Lizenztexte. |
 | **`deu.traineddata` aus `tessdata_best`** (Commit `e12c65a…`, 8,6 MB) statt `tessdata_fast` (1,5 MB) | Gemessen an den drei echten Rechnungen als Bild-PDF: `best` liest alle Nummern und Beträge richtig, `fast` liest „RE0146“ als „REO0146“ und verliert eine Position (Summenabgleich fängt es, aber dann gibt es keine E-Rechnung). Laufzeit `best` rund 7 s je Seite, für Einzelrechnungen unkritisch. |
 | Echte Testdaten **außerhalb des Repos** in `/root/erechnung-testdaten/` (0700), synthetische im Repo | Die Lexware-Rechnungen enthalten Namen und Anschriften von Marvins Kunden. Tests mit echten Daten laufen nur, wenn `ERECHNUNG_TESTDATEN` gesetzt ist (gm-claude), sonst übersprungen. Die CI testet mit einem synthetischen Text im selben Layout (Namen ersetzt) und einem mit reportlab erzeugten PDF. |
@@ -160,10 +179,13 @@ Regeln: Genau eine Vorlage muss passen, sonst Fehler („keine Vorlage“ / „m
   "ausgabe": "C:\\E-Rechnung\\E-Rechnungen",
   "originale": "C:\\E-Rechnung\\Originale",
   "fehler": "C:\\E-Rechnung\\Fehler",
+  "xml_einzeln": false,
   "verkaeufer": {"name": "GM IT Solutions", "strasse": "…", "plz": "…", "ort": "Pritzwalk", "land": "DE",
                  "ust_id": "DE…", "steuernummer": "", "email": "…", "iban": "DE…", "bic": "…"}
 }
 ```
+
+Optional `"xml_einzeln": true`: zusätzlich `<Nummer>.xml` im Ausgabeordner (Behörden, XRechnung-Portale). Fehlt der Schlüssel oder ist er nicht genau `true`, gilt `false` (abwärtskompatibel zu 0.1.5).
 
 `arbeit` ist immer `<Ordner der konfig.json>\arbeit`, das Log `<Ordner der konfig.json>\erechnung.log` (1 MB, 3 Dateien). Pflicht: `verkaeufer.name`, `ust_id` oder `steuernummer`, `iban`. Keine Zugangsdaten in der Datei.
 
@@ -182,13 +204,13 @@ Jede Verletzung → `SummenFehler` mit Klartext (z. B. „Netto: Positionen 1.19
 
 ## 9. Installation und Update (gm-update)
 
-- Art `datei`, ZIP `erechnung-konverter-<v>-windows-amd64.zip` mit `python\` (Embeddable + `Lib\site-packages`), `app\erechnung\`, `einrichten\`, `tesseract\` (`tesseract.exe`, DLLs, `tessdata\deu.traineddata`, `lizenzen\`) und `THIRD-PARTY.txt`. Größe 0.1.x ohne Tesseract 45,8 MB, mit 76,5 MB (Bau 02.11.2026). `python314._pth` enthält `python314.zip`, `.`, `Lib\site-packages`, `..\app`.
+- Art `datei`, ZIP `erechnung-konverter-<v>-windows-amd64.zip` mit `python\` (Embeddable + `Lib\site-packages`), `app\erechnung\`, `einrichten\`, `tesseract\` (`tesseract.exe`, DLLs, `tessdata\deu.traineddata`, `lizenzen\`), `java\` (Temurin-JRE), `mustang\Mustang-CLI-2.26.0.jar` und `THIRD-PARTY.txt`. Größe 0.1.x ohne Tesseract 45,8 MB, mit 76,5 MB (0.1.5); **0.1.6 mit Java und Mustang 178,9 MB** (entpackt 377 MB: java 146, mustang 57, python 110, tesseract 64 MB; Bau 02.11.2026). gm-update hält mehrere Versionen in `versionen\` vor, auf der Platte also ein Vielfaches. `python314._pth` enthält `python314.zip`, `.`, `Lib\site-packages`, `..\app`.
 - `gm-update.json` (in `einrichten/`):
   - `probe`: `["aktuell/python/python.exe", "-m", "erechnung", "--version"]` – importiert alle Abhängigkeiten, Frist 60 s
   - `stopp`/`start`: `Stop-`/`Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung'`
 - Eigenes `gm-update.exe` als SYSTEM-Aufgabe `GM-IT\Update erechnung-konverter` (legt `gm-update installieren` an). Version **0.1.4** (mit PR #6: Token und Konfiguration mit eingeschränkter DACL angelegt, Ordnerprüfung vor dem Anlegen, ProgramFilesDir aus HKLM).
 - Lesetoken je Kunde `update-<kunde>`, im Test `update-test` (`/root/.config/gm-it-os/update-test.token`).
-- CI: `.forgejo/workflows/release.yml` nach gm-update-Vorlage, `release/bauen.sh` lädt Python-Embed mit fester SHA-256 und installiert Wheels mit `--require-hashes --no-deps --only-binary=:all: --platform win_amd64 --python-version 3.14 --target`, lädt die conda-Pakete aus `release/tesseract-windows.txt` und `deu.traineddata` (Commit und SHA-256 in `bauen.sh`) und bricht bei jeder abweichenden Prüfsumme ab.
+- CI: `.forgejo/workflows/release.yml` nach gm-update-Vorlage, `release/bauen.sh` lädt Python-Embed mit fester SHA-256 und installiert Wheels mit `--require-hashes --no-deps --only-binary=:all: --platform win_amd64 --python-version 3.14 --target`, lädt die conda-Pakete aus `release/tesseract-windows.txt`, `deu.traineddata` (Commit und SHA-256 in `bauen.sh`), Temurin-JRE und Mustang-CLI (Version und SHA-256 in `release/mustang.env`, nur aus der Paketablage) und bricht bei jeder abweichenden Prüfsumme ab. CI-Test-Job und Release holen Mustang-CLI (und, falls das Job-Image kein Java hat, die Linux-JRE) ebenfalls nur aus der Paketablage (`release/mustang_holen.sh`) und brechen ab, wenn Mustang nicht gefunden wird.
 
 ## 10. Grundschutz-Abgleich
 
@@ -213,8 +235,9 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 | DET.3.1 | Protokollierung | `erechnung.log` je Datei: Eingang, Vorlage, Ergebnis/Fehler; `gm-update.log` |
 | NOT.4.15 | Wiederherstellungsweg | Runbook `docs/einrichten.md`: Neuinstallation mit `einrichten.ps1`, vorige Version über gm-update-Rückweg; Originale bleiben in `Originale` |
 | ASST.2.3 | Inventar der Anwendungen | Version in `stand.json`; Python- und Paketversionen in `release/requirements-windows.txt` |
-| DEV / TEST (IDs im Katalog nachschlagen **[n. o. b.]**) | Sichere Entwicklung, Tests vor Freigabe | pytest in der CI, Mustang-Prüfung vor jeder Freigabe, Lieferkette: Hashes für Python-Embed, alle Wheels, alle Tesseract-Pakete und `deu.traineddata` |
+| DEV / TEST (IDs im Katalog nachschlagen **[n. o. b.]**) | Sichere Entwicklung, Tests vor Freigabe | pytest in der CI inkl. echter Mustang-Prüfung synthetischer Rechnungen, auf dem Gerät Mustang-Prüfung **jeder** Rechnung vor dem Ablegen (3.4), Lieferkette: Hashes für Python-Embed, alle Wheels, alle Tesseract-Pakete, `deu.traineddata`, JRE und Mustang-CLI |
 | ASST.2.3 / DEV (Lieferkette) | **Neue Fremdsoftware Tesseract** (Freigabe Marvin, 02.11.2026) | Herkunft: conda-forge win-64 (`https://conda.anaconda.org/conda-forge/win-64/…`), 24 Pakete mit SHA-256 aus der Repodata in `release/tesseract-windows.txt`; Tesseract 5.5.3 (`he87eeb8_0`, SHA-256 `edbe2455…e024`); `deu.traineddata` aus `github.com/tesseract-ocr/tessdata_best`, Commit `e12c65a915945e4c28e237a9b52bc4a8f39a0cec`, SHA-256 `8407331d…f0d06e`. Lizenzen: Apache 2.0 (Tesseract, tessdata, OpenSSL, LERC), sonst BSD/MIT/zlib-artig, libiconv LGPL-2.1 als eigene DLL; Liste `THIRD-PARTY.txt`, Texte in `tesseract\lizenzen\`. Aktualisierung nur mit neuer Pinliste und neuem Release |
+| ASST.2.3 / DEV (Lieferkette) | **Neue Fremdsoftware Mustang-CLI und Java-Laufzeit** (Freigabe Marvin, 02.11.2026) | Mustang-CLI 2.26.0: Maven Central `org.mustangproject:Mustang-CLI:2.26.0`, SHA-1 gleich der Maven-Central-`.sha1` (`8755fc33…64e2`), PGP-Signatur `.asc` gültig (Jochen Stärk, Schlüssel `C513 CD93 0D3D 3D21 0485 C567 1192 EE26 4DB7 4319`), SHA-256 `42d7868cb68264874a7b8cab4c3587b03b23ccc7cd72373da917f66758bb9736`, Apache 2.0 (gebündelte Bibliotheken u. a. veraPDF GPL-3.0+/MPL-2.0, Saxon-HE MPL-2.0). Eclipse Temurin 21 JRE 21.0.13+9 (Adoptium, `github.com/adoptium/temurin21-binaries`): Windows-ZIP SHA-256 `2332c0b4cff6bed722da3567c91d5e47568bcba863fa4945d0a8d6fc76158628`, Linux-tar.gz (nur CI) `a535a1df9c6284d9618872984e026ae0352d1f7e9e0605425c0e6114f47351dd`, beide gleich den Prüfsummen der Adoptium-API, GPL-2.0 mit Classpath Exception. Einmal geladen und in der Forgejo-Paketablage abgelegt (`generic/mustang-cli/2.26.0/…`, `generic/temurin-jre/21.0.13_9/…`, Rückladen mit gleicher SHA-256 geprüft); Bau und CI laden nur von dort. Liste `THIRD-PARTY.txt`, Texte in `java\legal\` und im Jar. Aktualisierung nur mit neuer `release/mustang.env` und neuem Release (Java-Sicherheitsupdates quartalsweise beachten) |
 | X.1.1.2 / BER.3.6 | Zuständigkeiten, Admin-Konten | Einrichtung nur durch GM IT mit Admin-Konto; keine eigenen Konten der App |
 
 **Abweichungen:**
@@ -222,11 +245,11 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 | Nr | ID | Abweichung | Grund | Art |
 |---|---|---|---|---|
 | A1 | BER.4.1 | Überwacher läuft als SYSTEM und liest ungeprüfte PDFs (Parser pdfminer) | Vorgabe Marvin; als `LOCAL SERVICE` wäre das Restrisiko kleiner (eine Zeile in `einrichten.ps1` + Rechte auf Daten- und Arbeitsordner). Frage an Marvin | temporär |
-| A2 | – (Archivierung, GoBD) | Keine PDF/A-3 | Ghostscript nicht im ersten Wurf; ZUGFeRD-Empfänger akzeptieren in der Praxis meist auch Nicht-PDF/A, Mustang meldet das als Fehler der PDF-Prüfung | temporär |
+| A2 | – (Archivierung, GoBD) | Keine PDF/A-3; die Mustang-Prüfung in der App prüft deshalb nur die XML, nicht den PDF-Teil (3.4) | Ghostscript nicht im ersten Wurf; ZUGFeRD-Empfänger akzeptieren in der Praxis meist auch Nicht-PDF/A, Mustang meldet das als Fehler der PDF-Prüfung (veraPDF), die XML-Prüfung ist davon unabhängig | temporär |
 | A3 | DET.5.10.2 | Keine Monitoring-Anbindung von `stand.json` und Fehlern | Durchstich zuerst | temporär |
 | A4 | BER.4.1 | Benutzer haben Ändern-Recht in `Eingang` | Spooler-Kontext unbelegt (3.1) | temporär, Klärung in Task 10 |
 
-**Restrisiken:** Manipuliertes PDF könnte eine Lücke im Parser als SYSTEM ausnutzen (A1); mit der Texterkennung kommen pdfium (Rendern) und Tesseract/Leptonica (liest nur das selbst erzeugte PNG) hinzu, ebenfalls als SYSTEM. Begrenzung: höchstens 20 Seiten, 6000 px, 120 s je Seite. Per Texterkennung gelesene Nummer, Daten und Käufer sichert kein Summenabgleich (Gegenmaßnahmen 3.2, Hinweisdatei `.ocr.txt`). Jeder lokale Benutzer kann eine E-Rechnung aus einem beliebigen PDF erzeugen lassen (gewollt, entspricht dem Drucken).
+**Restrisiken:** Manipuliertes PDF könnte eine Lücke im Parser als SYSTEM ausnutzen (A1); mit der Texterkennung kommen pdfium (Rendern) und Tesseract/Leptonica (liest nur das selbst erzeugte PNG) hinzu, ebenfalls als SYSTEM. Begrenzung: höchstens 20 Seiten, 6000 px, 120 s je Seite. Per Texterkennung gelesene Nummer, Daten und Käufer sichert kein Summenabgleich (Gegenmaßnahmen 3.2, Hinweisdatei `.ocr.txt`). Jeder lokale Benutzer kann eine E-Rechnung aus einem beliebigen PDF erzeugen lassen (gewollt, entspricht dem Drucken). Java/Mustang laufen ebenfalls als SYSTEM, verarbeiten aber nur die selbst erzeugte XML (kein Benutzer-PDF), ohne Netzzugriff, mit Frist 60 s; die JRE braucht Sicherheitsupdates wie jede Laufzeit (neues Release).
 
 ## 11. Offene Punkte
 
@@ -236,12 +259,13 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 4. Monitoring (A3), Konto `LOCAL SERVICE` (A1).
 5. XRechnung (UBL/CII mit Leitweg-ID) für öffentliche Auftraggeber.
 6. Empfang eingehender E-Rechnungen (Projektziel Teil 2).
-7. VM 108: Texterkennung mit dem gepackten `tesseract.exe` (DLL-Hülle, Laufzeit als SYSTEM), Druck aus Edge Ende-zu-Ende, „Senden an“ (kopiert oder verschiebt? Freigabeverletzung bei Explorer-Kopie?), Profil neuer Benutzer.
+7. VM 108: Mustang mit dem gepackten `java\bin\java.exe` als SYSTEM (Laufzeit, kein Konsolenfenster, Speicher), Update-Größe 179 MB über gm-update.
+8. VM 108: Texterkennung mit dem gepackten `tesseract.exe` (DLL-Hülle, Laufzeit als SYSTEM), Druck aus Edge Ende-zu-Ende, „Senden an“ (kopiert oder verschiebt? Freigabeverletzung bei Explorer-Kopie?), Profil neuer Benutzer.
 
 ## 12. Abnahme Durchstich
 
-1. pytest grün in der CI; Mustang auf gm-claude: XML der drei Lexware-Rechnungen ohne Fehler (XSD + Schematron).
+1. pytest grün in der CI (inkl. Mustang auf synthetische Rechnungen); Mustang auf gm-claude: XML der Lexware-Rechnungen ohne Fehler (XSD + Schematron) – erfüllt 02.11.2026 für RE0146, RE0148, RE0149, RE0158.
 2. Beträge der erzeugten XML für RE0146, RE0148, RE0149 identisch mit Lexware-XML (Netto, Steuer, Brutto, je Position netto).
 3. Tag `v0.1.0`, CI lädt Release hoch, Marvin gibt frei.
-4. Auf VM 108: `einrichten.ps1` richtet alles ein, Druck auf „E-Rechnung“ → `E-Rechnungen\RE….pdf/.xml`; falsche Summe → `Fehler\…fehler.txt`.
+4. Auf VM 108: `einrichten.ps1` richtet alles ein, Druck auf „E-Rechnung“ → `E-Rechnungen\RE….pdf` (ab 0.1.6 ohne `.xml`); falsche Summe → `Fehler\…fehler.txt`.
 5. Update auf eine höhere Version über gm-update (Probe, Stopp, Start) läuft durch.

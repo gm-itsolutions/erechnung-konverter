@@ -12,7 +12,14 @@ jobs:
       # Python 3.14 liegt im Job-Image (gm-actions/ci-ubuntu), kein Download mehr
       - run: python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      # Mustang-Prüfung der synthetischen Rechnungen: Jar und (falls das Image kein Java hat) Linux-JRE aus dem eigenen Spiegel
+      - name: Mustang holen
+        run: sh release/mustang_holen.sh
+        env:
+          PAKET_TOKEN: ${{ secrets.PAKET_TOKEN }}
+      # Mustang muss gefunden werden, sonst würden die echten Prüfungen still übersprungen
+      - run: python -c 'from erechnung import mustang; a = mustang.mustang(); assert a, "Mustang fehlt"; print(a)'
+      - run: python -m pytest -q -rs
   paket:
     runs-on: ubuntu-latest
     steps:

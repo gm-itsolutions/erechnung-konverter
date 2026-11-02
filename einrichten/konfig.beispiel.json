@@ -3,6 +3,7 @@
   "ausgabe": "C:\\E-Rechnung\\E-Rechnungen",
   "originale": "C:\\E-Rechnung\\Originale",
   "fehler": "C:\\E-Rechnung\\Fehler",
+  "xml_einzeln": false,
   "verkaeufer": {
     "name": "…",
     "strasse": "…",

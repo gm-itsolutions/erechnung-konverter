@@ -34,11 +34,16 @@ jobs:
           chmod 0755 /usr/local/bin/gm-update
       # Python 3.14 liegt im Job-Image (gm-actions/ci-ubuntu), kein Download mehr
       - run: python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
+      - name: Mustang holen
+        run: sh release/mustang_holen.sh
+        env:
+          PAKET_TOKEN: ${{ secrets.PAKET_TOKEN }}
       - name: Tests
         run: |
           set -euo pipefail
           python -m pip install -r requirements-dev.txt
-          python -m pytest -q
+          python -c 'from erechnung import mustang; assert mustang.mustang(), "Mustang fehlt"'
+          python -m pytest -q -rs
       - name: Bauen (Datei)
         if: hashFiles('Dockerfile') == ''
         env:
