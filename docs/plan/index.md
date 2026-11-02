@@ -45,6 +45,7 @@
 | 12 | `task-12-vm-test-update.md` | VM 108: Erstinstallation über gm-update | Subagent | 30 Min. | 10, 11 | erledigt (Installation über gm-update 0.1.4 durch einrichten.ps1) |
 | 13 | `task-13-vorlage-verfeinern.md` | Vorlage mit gedruckten PDFs verfeinern, `v0.1.1` | Subagent | 45 Min. | 10 | teilweise (Branch task-13: Fälligkeit, Silbentrennung); offen: gedruckte PDFs von VM 108 |
 | 14 | `task-14-freigabe-update-test.md` | Freigabe `v0.1.1` (Marvin), Update-Test auf VM | **Marvin** + Subagent | 30 Min. | 12, 13 | offen |
+| 15 | – (Branch `ocr-senden-an`, Spezifikation 3.2/3.3) | Senden an, Texterkennung mit Tesseract | Subagent | – | 13 | umgesetzt auf Branch; offen: Merge, VM-Test (Spezifikation 11.7) |
 
 **Reihenfolge / Wellen (heute Nacht):**
 1. Parallel: 01, 02, 07

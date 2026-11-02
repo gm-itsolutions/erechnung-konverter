@@ -106,3 +106,39 @@ def test_lexware_zusatzzeile_stoert_nicht():
     text = text.replace("Datum: 15.10.2026\n", "Datum: 15.10.2026\nAbteilung Einkauf\n")
     r = rechnung_aus_text(text, finde_vorlage(text, lade_vorlagen(STANDARD)), VERKAEUFER)
     assert (r.kaeufer.name, r.kaeufer.strasse, r.kaeufer.plz) == ("Beispiel Handel GmbH", "Hauptstraße 5", "19348")
+def _ocr_lexware():
+    """Lexware-Text mit typischen Abweichungen der Texterkennung (beobachtet an Bild-PDFs der echten Rechnungen)."""
+    from erechnung.ocr import bereinige
+    text = (Path(__file__).parent / "daten" / "lexware-synthetisch.txt").read_text(encoding="utf-8")
+    for alt, neu in [
+        ("Pos. Bezeichnung Menge Einheit Einzel € USt. % Gesamt €", "[00 [Bassiehnung __—__] Menge | Eine | emeete [Ust % | 0osame"),
+        ("1 Arbeitsstunde 2 Stunde 95,00 19,00 190,00", "A Arbeitsstunde 2 | Stunde 95,00 | 19,00 190,00"),  # Pos.-Nr. verlesen
+        ("2 Patchkabel Cat. 6 - 1 m 2 Stück 5,00 19,00 10,00", "2 Patchkabel Cat. 6 - 1 m 2 Stück 5.00 19.00 10.00 €"),
+        ("Zwischensumme 190,00", "[aischensumme | vum"),
+        ("Datum: 15.10.2026", "Datum: 15.1O.2026"),
+        ("Zwischensumme (netto) 200,00", "Zwischensumme(netto) 200,00 EUR"),
+        ("Umsatzsteuer 19 % 38,00", "Umsatzsteuer 19% 38.00"),
+        ("Gesamtbetrag 238,00", "Gesamtbetrag 2 38,00 €"),
+        ("GM - IT Solutions - Marvin Gawenda\n", "GM - IT Solutions -  Marvin Gawenda\n"),
+    ]:
+        assert alt in text, alt
+        text = text.replace(alt, neu, 1)
+    return bereinige(text)
+def test_lexware_ocr_tolerant():
+    from erechnung.vorlagen import STANDARD
+    text = _ocr_lexware()
+    r = rechnung_aus_text(text, finde_vorlage(text, lade_vorlagen(STANDARD)), VERKAEUFER)
+    assert (r.nummer, str(r.datum)) == ("RE9146", "2026-10-15")
+    assert summenabgleich(r) == {D("19"): (D("200.00"), D("38.00"))}
+    assert [(p.nr, p.netto) for p in r.positionen] == [("1", D("190.00")), ("2", D("10.00"))]
+    assert r.positionen[0].bezeichnung == "Arbeitsstunde • Wartung Server - 2 • Prüfung Datensicherung"
+    assert r.positionen[1].bezeichnung == "Patchkabel Cat. 6 - 1 m Farbe grau"   # Kopfzeile Seite 2 nicht angehängt
+def test_lexware_nummer_uneinheitlich():
+    from erechnung.vorlagen import STANDARD
+    vorlagen = lade_vorlagen(STANDARD)
+    text = _ocr_lexware().replace("Rechnung RE9146", "Rechnung RE9148")      # Überschrift verlesen
+    with pytest.raises(VorlagenFehler, match="Rechnungsnummer uneinheitlich"):
+        rechnung_aus_text(text, finde_vorlage(text, vorlagen), VERKAEUFER)
+    text = _ocr_lexware().replace("Rechnungsnr.: RE9146", "Rechnungsnr.: REO9146")   # O statt 0: nie raten
+    with pytest.raises(VorlagenFehler, match="Feld nummer"):
+        rechnung_aus_text(text, finde_vorlage(text, vorlagen), VERKAEUFER)

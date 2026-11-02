@@ -1,15 +1,18 @@
 """Abgleich mit echten Lexware-Rechnungen (nur mit ERECHNUNG_TESTDATEN, Daten nie im Repo)."""
 import os
+import shutil
 import tempfile
+from functools import partial
 from pathlib import Path
 import pytest
 from facturx import xml_check_xsd
 from lxml import etree
+from erechnung import ocr
 from erechnung.betraege import betraege
 from erechnung.cii import erzeuge_cii
 from erechnung.modell import summenabgleich
 from erechnung.vorlagen import STANDARD, lade_vorlagen, lies_rechnung
-from hilfen import VERKAEUFER
+from hilfen import VERKAEUFER, bild_pdf
 
 DATEN = os.environ.get("ERECHNUNG_TESTDATEN")
 pytestmark = [pytest.mark.echt, pytest.mark.skipif(not DATEN, reason="ERECHNUNG_TESTDATEN nicht gesetzt")]
@@ -51,3 +54,24 @@ def test_bezeichnung_wie_lexware(nummer):
                      + p.xpath("string(.//*[local-name()='Description'])").split())
             for p in _lexware(nummer).xpath("//*[local-name()='SpecifiedTradeProduct']")]
     assert [" ".join(p.bezeichnung.replace("•", "-").split()) for p in r.positionen] == soll
+
+@pytest.mark.skipif(not shutil.which("tesseract"), reason="tesseract nicht installiert")
+@pytest.mark.parametrize("dpi", [300, 200])
+@pytest.mark.parametrize("nummer", ["RE0146", "RE0148", "RE0149"])
+def test_ocr_wie_lexware(nummer, dpi, tmp_path, monkeypatch):
+    """Echte Rechnung als Bild-PDF ohne Text (wie Edge-Druck) → Texterkennung → dieselben Beträge wie Lexware.
+    Nutzt tessdata_best aus $ERECHNUNG_TESTDATEN/tessdata (wie im Paket), sonst das tessdata des Systems."""
+    if (Path(DATEN) / "tessdata" / "deu.traineddata").exists():
+        monkeypatch.setenv("TESSDATA_PREFIX", str(Path(DATEN) / "tessdata"))
+    pdf = tmp_path / f"{nummer}.pdf"
+    pdf.write_bytes(bild_pdf((Path(DATEN) / f"{nummer}.pdf").read_bytes(), dpi))
+    (tmp_path / "arbeit").mkdir()
+    r = lies_rechnung(pdf, lade_vorlagen(STANDARD), VERKAEUFER, partial(ocr.erkenne, arbeit=tmp_path / "arbeit", aufruf=ocr.tesseract()))
+    assert r.ocr_text
+    steuern = summenabgleich(r)
+    soll = betraege((Path(DATEN) / f"{nummer}.lexware.xml").read_bytes())
+    assert r.nummer == soll["nummer"]
+    assert (r.summe_netto, sum(s for _, s in steuern.values()), r.summe_brutto) == (soll["netto"], soll["steuer"], soll["brutto"])
+    assert [p.netto for p in r.positionen] == soll["positionen"]
+    assert r.faellig.strftime("%Y%m%d") == _lexware(nummer).xpath("string(//*[local-name()='DueDateDateTime']/*)")
+    assert betraege(erzeuge_cii(r, steuern)) == soll

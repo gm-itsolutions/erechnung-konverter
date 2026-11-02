@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from facturx import get_xml_from_pdf
 from erechnung import __version__
-from erechnung.ueberwachen import lade_konfig, pruefe_ordner, schritt
-from hilfen import pdf_aus_text
+from erechnung.ueberwachen import _frei, lade_konfig, pruefe_ordner, schritt
+from hilfen import bild_pdf, pdf_aus_text
 from test_vorlagen import TEXT, VORLAGE
 REPO = Path(__file__).parents[1]
 VERK = {"name": "GM IT Solutions", "strasse": "Musterstraße 1", "plz": "16928", "ort": "Pritzwalk",
@@ -59,8 +59,10 @@ def test_unvollstaendig(k):
     (k.eingang / "rechnung.pdf").write_bytes(pdf_aus_text(TEXT.splitlines())[:-200])
     schritt(k)
     assert "unvollständig" in next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
-def test_spooler_schreibt_noch(k, monkeypatch):
-    drucke(k)
+@pytest.mark.parametrize("name", ["rechnung.pdf", "RE9001 Kopie (2).pdf"])
+def test_spooler_schreibt_noch(k, monkeypatch, name):
+    """Spooler oder Explorer-Kopie hält die Datei offen → Freigabeverletzung → nächster Takt."""
+    drucke(k, name=name)
     echt = os.replace
     def gesperrt(a, b):
         if Path(a).parent == k.eingang:
@@ -68,7 +70,7 @@ def test_spooler_schreibt_noch(k, monkeypatch):
         return echt(a, b)
     monkeypatch.setattr(os, "replace", gesperrt)
     assert schritt(k) == 0
-    assert namen(k.eingang) == ["rechnung.pdf"]
+    assert namen(k.eingang) == [name]
 def test_verknuepfung_abgelehnt(k, tmp_path):
     os.rmdir(k.ausgabe)
     (tmp_path / "anderswo").mkdir()
@@ -85,3 +87,42 @@ def test_cli_umwandeln(k, tmp_path):
                          capture_output=True, text=True, cwd=REPO)
     assert aus.returncode == 0, aus.stdout + aus.stderr
     assert (k.ausgabe / "RE9001.xml").exists() and pdf.exists()
+
+def test_beliebige_pdf_namen(k):
+    """Senden an / Kopieren: jede *.pdf (auch .PDF, Leerzeichen, Umlaute), andere Dateien bleiben liegen."""
+    drucke(k, name="Rechnung für Müller (1).PDF")
+    drucke(k, name="zweite.pdf")
+    (k.eingang / "notiz.txt").write_text("x", encoding="utf-8")
+    assert schritt(k) == 2
+    assert namen(k.eingang) == ["notiz.txt"]
+    assert namen(k.ausgabe) == ["RE9001-2.pdf", "RE9001-2.xml", "RE9001.pdf", "RE9001.xml"]
+    assert len(namen(k.originale)) == 2
+def test_gleicher_name_fehler(k):
+    for _ in range(2):
+        drucke(k, TEXT.replace("Brutto 238,00", "Brutto 239,00"), name="kaputt.pdf")
+        schritt(k)
+    assert len(namen(k.fehler)) == 4 and namen(k.eingang) == []
+def test_frei(tmp_path):
+    (tmp_path / "a.pdf").write_bytes(b"")
+    (tmp_path / "a-2.ocr.txt").write_bytes(b"")
+    assert _frei(tmp_path, "b", ".pdf") == "b"
+    assert _frei(tmp_path, "a", ".pdf", ".xml", ".ocr.txt") == "a-3"
+def test_ocr(k):
+    k.ocr = lambda pdf: TEXT
+    (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(TEXT.splitlines())))
+    assert schritt(k) == 1
+    assert namen(k.ausgabe) == ["RE9001.ocr.txt", "RE9001.pdf", "RE9001.xml"]
+    notiz = (k.ausgabe / "RE9001.ocr.txt").read_text(encoding="utf-8")
+    assert "per Texterkennung gelesen" in notiz and "Rechnung Nr. RE9001" in notiz
+    get_xml_from_pdf((k.ausgabe / "RE9001.pdf").read_bytes(), check_xsd=True)
+def test_ocr_summenfehler(k):
+    k.ocr = lambda pdf: TEXT.replace("Brutto 238,00", "Brutto 239,00")
+    (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(["x"])))
+    schritt(k)
+    grund = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
+    assert "Brutto" in grund and "per Texterkennung gelesen" in grund
+def test_ohne_tesseract(k):
+    k.ocr = None
+    (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(["x"])))
+    schritt(k)
+    assert "kein Text" in next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")

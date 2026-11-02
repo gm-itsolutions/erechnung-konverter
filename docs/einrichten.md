@@ -10,6 +10,8 @@ Einrichtung, Prüfung, Pflege und Rückbau des E-Rechnung-Konverters auf einem W
 | Daten | `C:\E-Rechnung\` mit `Eingang`, `E-Rechnungen`, `Originale`, `Fehler` |
 | Aufgaben | `\GM-IT\E-Rechnung` (Überwacher, SYSTEM), `\GM-IT\Update erechnung-konverter` (gm-update, täglich 03:00) |
 | Drucker / Port | `E-Rechnung` (Microsoft Print to PDF) → `C:\E-Rechnung\Eingang\rechnung.pdf` |
+| Senden an | Rechtsklick auf ein PDF → **Senden an → E-Rechnung** (Verknüpfung auf `C:\E-Rechnung\Eingang`, in jedem Profil) |
+| Texterkennung | `aktuell\tesseract\tesseract.exe` mit `tessdata\deu.traineddata`, nur für PDFs ohne Text |
 
 ## Voraussetzungen
 
@@ -64,9 +66,10 @@ Das Skript ist wiederholbar und macht der Reihe nach:
 1. Datenordner anlegen bzw. Besitzer und Rechte nachziehen (Besitzer Administratoren, Vererbung aus; SYSTEM/Admins Vollzugriff, Benutzer Lesen, in `Eingang` Ändern). Bricht ab, wenn ein Ordner eine Junction/ein Symlink ist.
 2. Programmordner (unter `ProgramFilesDir` aus HKLM), `konfig.json`, `arbeit\`, `vorlagen\`.
 3. Drucker und Dateiport; fehlt „Microsoft Print to PDF“, wird das Windows-Feature aktiviert.
-4. Aufgabe `\GM-IT\E-Rechnung` (SYSTEM, beim Start und alle 5 Min., nie doppelt).
-5. `gm-update installieren`: Token und `gm-update.json` nur SYSTEM/Admins, Aufgabe `\GM-IT\Update erechnung-konverter`, erster Lauf (lädt, prüft und installiert die freigegebene Version, startet den Überwacher).
-6. Überwacher starten, falls schon eine Version da ist.
+4. „Senden an → E-Rechnung“ in jedem vorhandenen Benutzerprofil und im Default-Profil (neue Benutzer bekommen es bei der ersten Anmeldung). Profile ohne SendTo-Ordner werden übersprungen. Wer nach der Einrichtung ein neues Profil anlegt, hat den Eintrag automatisch; Profile mit umgeleitetem AppData (Ordnerumleitung) nicht.
+5. Aufgabe `\GM-IT\E-Rechnung` (SYSTEM, beim Start und alle 5 Min., nie doppelt).
+6. `gm-update installieren`: Token und `gm-update.json` nur SYSTEM/Admins, Aufgabe `\GM-IT\Update erechnung-konverter`, erster Lauf (lädt, prüft und installiert die freigegebene Version, startet den Überwacher).
+7. Überwacher starten, falls schon eine Version da ist.
 
 Danach die Token-Datei im Setup-Ordner löschen:
 
@@ -87,6 +90,8 @@ Get-Printer -Name 'E-Rechnung' | Format-List Name, DriverName, PortName
 
 - `stand.json`: `version` gesetzt, `fehler` leer.
 - Testdruck: eine Rechnung aus dem Programm des Kunden auf **E-Rechnung** drucken, angemeldet als Benutzer. Nicht als SYSTEM (RMM-Shell, geplante Aufgabe als SYSTEM): Dann bleibt der Auftrag mit „Fehler – Wird gedruckt“ in der Warteschlange hängen, es entsteht keine Datei, der Drucker steht auf Fehler. Solche Aufträge mit `Get-PrintJob -PrinterName 'E-Rechnung' | Remove-PrintJob` löschen. Der Spooler schreibt die Datei im Kontext des druckenden Benutzers (Besitzer der Datei ist der Benutzer), deshalb brauchen Benutzer in `Eingang` das Recht Ändern. Nach wenigen Sekunden liegen `<Rechnungsnummer>.pdf` und `.xml` in `C:\E-Rechnung\E-Rechnungen`, das Original in `Originale`.
+- Senden an: als Benutzer im Explorer Rechtsklick auf eine Lexware-PDF → **Senden an → E-Rechnung**. Ergebnis wie beim Druck; die Datei im Ausgangsordner des Benutzers sollte erhalten bleiben (Explorer kopiert; auf VM 108 noch zu bestätigen).
+- Texterkennung: eine Rechnung aus **Edge** auf **E-Rechnung** drucken (Edge druckt PDFs als Bild). Nach etwa 10 s je Seite liegen `<Nummer>.pdf`, `.xml` und `<Nummer>.ocr.txt` (Hinweis + erkannter Text) in `E-Rechnungen`; im Log steht „per Texterkennung gelesen“ und beim Start „Texterkennung: …\tesseract.exe“.
 - Log: `%ProgramFiles%\GM-IT\erechnung-konverter\erechnung.log` (je Datei Eingang, Vorlage, Ergebnis/Fehler), gm-update: `gm-update.log` daneben.
 
 ### 4. Neue Vorlage ohne Release
@@ -108,7 +113,10 @@ Fehler stehen je Datei in `C:\E-Rechnung\Fehler\<stempel>-<name>.fehler.txt`, da
 | Meldung / Bild | Ursache | Abhilfe |
 |---|---|---|
 | keine Vorlage passt | Rechnungsaufbau unbekannt oder Schlüsselwörter geändert | Vorlage ergänzen (Schritt 4), PDF erneut nach `Eingang` |
-| kein Text im PDF (als Bild gedruckt?) | Programm druckt Seiten als Bild (z. B. SumatraPDF) | Aus einem Programm drucken, das Text druckt (Office, Browser, Fachprogramm), oder das Original-PDF nach `Eingang` kopieren; OCR gibt es nicht |
+| kein Text im PDF (als Bild gedruckt?), Texterkennung nicht verfügbar | Programm druckt Seiten als Bild (Edge, SumatraPDF) und `tesseract\` fehlt im Paket | Original-PDF per **Senden an → E-Rechnung** übergeben; Paket prüfen (`aktuell\tesseract\tesseract.exe`) |
+| … (per Texterkennung gelesen) | PDF ohne Text, Texterkennung hat etwas anders gelesen (Nummer, Betrag, Position). Es entsteht bewusst keine E-Rechnung | Original-PDF per **Senden an** übergeben (dann ohne Texterkennung). Häuft es sich: PDF aus `Fehler` an GM IT, Vorlage anpassen |
+| Texterkennung fehlgeschlagen (Seite …) | `tesseract.exe` startet nicht (fehlende DLL), Frist 120 s überschritten | `erechnung.log`; als Administrator `& "$env:ProgramFiles\GM-IT\erechnung-konverter\aktuell\tesseract\tesseract.exe" --version` |
+| zu viele Seiten für die Texterkennung | Bild-PDF mit mehr als 20 Seiten | Original-PDF mit Text übergeben |
 | Summenfehler (z. B. „Netto: Positionen … ≠ Rechnung …“) | Vorlage liest einen Betrag falsch oder die Rechnung ist rechnerisch falsch | PDF prüfen; Rechnung korrigieren oder Vorlage anpassen. Es entsteht bewusst keine E-Rechnung |
 | PDF unvollständig | Druckauftrag abgebrochen | Erneut drucken |
 | Nichts passiert, `pythonw` läuft nicht | Überwacher beendet oder App fehlt | `erechnung.log` lesen; fehlt `aktuell` im Programmordner: `stand.json` und `gm-update.log` lesen (keine Freigabe, Token, Netz). Aufgabe startet einen beendeten Überwacher binnen 5 Min. neu |
@@ -124,6 +132,12 @@ Unregister-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung' -Confirm:$fa
 Unregister-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'Update erechnung-konverter' -Confirm:$false
 Remove-Printer -Name 'E-Rechnung'
 Remove-PrinterPort -Name 'C:\E-Rechnung\Eingang\rechnung.pdf'
+# Senden an: Verknüpfung aus allen Profilen und dem Default-Profil entfernen
+$profilordner = @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath } | ForEach-Object { $_.LocalPath })
+$profilordner += (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList').Default
+foreach ($pr in $profilordner) {
+  Remove-Item -LiteralPath (Join-Path $pr 'AppData\Roaming\Microsoft\Windows\SendTo\E-Rechnung.lnk') -ErrorAction SilentlyContinue
+}
 Remove-Item -Recurse -Force "$env:ProgramFiles\GM-IT\erechnung-konverter"
 ```
 

@@ -3,11 +3,14 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Callable
 import pdfplumber
 import yaml
 from .modell import Partei, Position, Rechnung, betrag, datum
 STANDARD = Path(__file__).parent / "vorlagen"
 PFLICHT = ("nummer", "datum", "summe_netto", "summe_brutto")
+MIN_ZEICHEN = 20          # weniger Buchstaben/Ziffern im PDF → Bild → Texterkennung
+OCR_HINWEIS = "per Texterkennung gelesen"
 class VorlagenFehler(ValueError):
     pass
 def pdf_text(pdf: Path, layout: bool = False) -> str:
@@ -34,7 +37,8 @@ def lade_vorlagen(*ordner: Path) -> list[dict]:
                 vorlagen.append(_pruefe(yaml.safe_load(datei.read_text(encoding="utf-8")) or {}, datei))
     return vorlagen
 def finde_vorlage(text: str, vorlagen: list[dict]) -> dict:
-    passend = [v for v in vorlagen if all(k in text for k in v["schluesselwoerter"])]
+    kompakt = "".join(text.split())                         # Leerzeichen egal (Texterkennung)
+    passend = [v for v in vorlagen if all("".join(k.split()) in kompakt for k in v["schluesselwoerter"])]
     if not passend:
         raise VorlagenFehler("keine Vorlage passt zu diesem Layout")
     if len(passend) > 1:
@@ -90,6 +94,8 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         kaeufer = Partei(**{k: w.strip() for k, w in m.groupdict().items() if w})
     steuern = {_satz(m["satz"]): betrag(m["betrag"]) for m in re.finditer(v["steuern"], text, re.MULTILINE)} if v.get("steuern") else {}
     opt = lambda n: _feld(text, v, n)
+    if "nummer_kontrolle" in v["felder"] and opt("nummer_kontrolle") != opt("nummer"):
+        raise VorlagenFehler(f"Rechnungsnummer uneinheitlich gelesen: {opt('nummer')} / {opt('nummer_kontrolle')}")
     faellig = datum(opt("faellig")) if opt("faellig") else None
     if not faellig and opt("zahlungsziel_tage"):           # „Zahlungsziel 7 Tage …“ → Rechnungsdatum + 7
         faellig = datum(opt("datum")) + timedelta(days=int(opt("zahlungsziel_tage")))
@@ -99,11 +105,21 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         summe_ust=betrag(opt("summe_ust")) if opt("summe_ust") else None, steuern=steuern,
         leistungsdatum=datum(opt("leistungsdatum")) if opt("leistungsdatum") else None,
         faellig=faellig, vorlage=v["name"])
-def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei) -> Rechnung:
+def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
+                  ocr: Callable[[Path], str] | None = None) -> Rechnung:
+    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden) und dieselbe Vorlagenlogik."""
     text = pdf_text(pdf)
-    if not text.strip():
-        raise VorlagenFehler("kein Text im PDF (als Bild gedruckt?)")
-    v = finde_vorlage(text, vorlagen)
-    if v.get("layout"):
-        text = pdf_text(pdf, layout=True)
-    return rechnung_aus_text(text, v, verkaeufer)
+    if len(re.findall(r"\w", text)) >= MIN_ZEICHEN:
+        v = finde_vorlage(text, vorlagen)
+        if v.get("layout"):
+            text = pdf_text(pdf, layout=True)
+        return rechnung_aus_text(text, v, verkaeufer)
+    if ocr is None:
+        raise VorlagenFehler("kein Text im PDF (als Bild gedruckt?), Texterkennung nicht verfügbar")
+    text = ocr(pdf)
+    try:
+        r = rechnung_aus_text(text, finde_vorlage(text, vorlagen), verkaeufer)
+    except ValueError as e:
+        raise VorlagenFehler(f"{e} ({OCR_HINWEIS})") from None
+    r.ocr_text = text
+    return r

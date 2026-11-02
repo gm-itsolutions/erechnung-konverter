@@ -77,7 +77,26 @@ $d = Get-Printer -Name $Drucker -ErrorAction SilentlyContinue
 if (-not $d) { Add-Printer -Name $Drucker -DriverName 'Microsoft Print to PDF' -PortName $port }
 elseif ($d.PortName -ne $port) { Set-Printer -Name $Drucker -PortName $port }
 
-# 4. Überwachungsaufgabe: SYSTEM, beim Start und alle 5 Min. (startet einen beendeten Überwacher neu), nie doppelt.
+# 4. "Senden an -> E-Rechnung": Verknüpfung auf den Eingang für alle vorhandenen Profile und das Default-Profil
+#    (neue Benutzer). PDFs aus Edge werden gerastert gedruckt (kein Text); per Senden an kommt das Original-PDF an.
+#    Wiederholbar: Save() überschreibt die Verknüpfung.
+$eingang = Join-Path $Daten 'Eingang'
+$profilordner = @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath } | ForEach-Object { $_.LocalPath })
+$profilordner += (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList').Default
+$shell = New-Object -ComObject WScript.Shell
+foreach ($pr in $profilordner) {
+  $sendto = Join-Path $pr 'AppData\Roaming\Microsoft\Windows\SendTo'
+  if (-not (Test-Path -LiteralPath $sendto -PathType Container)) { Write-Host "Senden an: $sendto fehlt - übersprungen"; continue }
+  if ((Get-Item -LiteralPath $sendto -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    Write-Warning "Senden an: $sendto ist eine Verknüpfung (Junction/Symlink) - übersprungen"; continue
+  }
+  $lnk = $shell.CreateShortcut((Join-Path $sendto 'E-Rechnung.lnk'))
+  $lnk.TargetPath = $eingang
+  $lnk.Description = 'PDF-Rechnung an den E-Rechnung-Konverter übergeben'
+  $lnk.Save()
+}
+
+# 5. Überwachungsaufgabe: SYSTEM, beim Start und alle 5 Min. (startet einen beendeten Überwacher neu), nie doppelt.
 #    Vor gm-update anlegen: dessen erster Lauf ruft stopp/start dieser Aufgabe auf und verwirft die Version,
 #    wenn stopp scheitert (gm-update-Spezifikation Abschnitt 7, A-Datei Schritt 5).
 $py = Join-Path $prog 'aktuell\python\pythonw.exe'
@@ -89,8 +108,8 @@ $einst = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingO
 $wer = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung' -Action $aktion -Trigger $ausloeser -Settings $einst -Principal $wer -Force | Out-Null
 
-# 5. gm-update (ab 0.1.4): Token/Konfiguration nur SYSTEM+Admins, Update-Aufgabe, erster Lauf (lädt die freigegebene Version,
-#    stoppt/startet dabei die Aufgabe aus Schritt 4)
+# 6. gm-update (ab 0.1.4): Token/Konfiguration nur SYSTEM+Admins, Update-Aufgabe, erster Lauf (lädt die freigegebene Version,
+#    stoppt/startet dabei die Aufgabe aus Schritt 5)
 if (-not (Test-Path -LiteralPath $GmUpdateExe)) { throw "gm-update.exe fehlt: $GmUpdateExe" }
 & $GmUpdateExe installieren --konfig (Join-Path $PSScriptRoot 'gm-update.json') --token-datei $TokenDatei
 if ($LASTEXITCODE -ne 0) {
@@ -98,8 +117,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $prog 'gm-update.json'))) { throw "gm-update hat $prog nicht eingerichtet." }
 
-# 6. Überwacher starten (gm-update hat ihn nach dem ersten Update meist schon gestartet; IgnoreNew verhindert Doppelte)
+# 7. Überwacher starten (gm-update hat ihn nach dem ersten Update meist schon gestartet; IgnoreNew verhindert Doppelte)
 if (Test-Path -LiteralPath $py) { Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung' }
 else { Write-Warning "Noch keine App-Version installiert ($py fehlt). Die Aufgabe startet, sobald gm-update sie geladen hat." }
 
-Write-Host "Fertig. Drucker '$Drucker' -> $port; E-Rechnungen: $(Join-Path $Daten 'E-Rechnungen'); Log: $prog\erechnung.log"
+Write-Host "Fertig. Drucker '$Drucker' -> $port; Senden an -> E-Rechnung; E-Rechnungen: $(Join-Path $Daten 'E-Rechnungen'); Log: $prog\erechnung.log"

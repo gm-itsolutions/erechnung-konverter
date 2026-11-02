@@ -21,6 +21,7 @@ def test_betrag_unsinn(text):
         betrag(text)
 def test_datum():
     assert datum("05.11.2026") == date(2026, 11, 5)
+    assert datum("O4.1O.2026") == date(2026, 10, 4)   # Texterkennung: O in einem Datum ist eindeutig 0
 def test_runde_kaufmaennisch():
     assert runde(D("0.125")) == D("0.13")
     assert runde(D("2.675")) == D("2.68")

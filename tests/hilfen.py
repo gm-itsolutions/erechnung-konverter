@@ -30,3 +30,13 @@ def pdf_aus_text(zeilen: list[str]) -> bytes:
         y -= 14
     c.save()
     return puffer.getvalue()
+
+def bild_pdf(pdf: bytes, dpi: int = 300) -> bytes:
+    """PDF ohne Text: jede Seite als Bild (wie ein Druck aus Edge auf Microsoft Print to PDF)."""
+    import pypdfium2 as pdfium
+    d = pdfium.PdfDocument(pdf)
+    bilder = [s.render(scale=dpi / 72, grayscale=True).to_pil() for s in d]
+    d.close()
+    puffer = BytesIO()
+    bilder[0].save(puffer, format="PDF", save_all=True, append_images=bilder[1:], resolution=dpi)
+    return puffer.getvalue()

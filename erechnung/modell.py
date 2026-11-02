@@ -8,8 +8,11 @@ CENT = Decimal("0.01")
 def runde(x: Decimal) -> Decimal:
     return x.quantize(ZWEI, rounding=ROUND_HALF_UP)
 def betrag(text: str) -> Decimal:
-    """Deutscher Betrag: Tausenderpunkt/Leerzeichen, Dezimalkomma, optional €."""
-    t = re.sub(r"[€\s]", "", text).replace(".", "").replace(",", ".")
+    """Deutscher Betrag: Tausenderpunkt/Leerzeichen, Dezimalkomma, optional €/EUR.
+    Texterkennung: Ein Punkt vor genau zwei Endziffern ist das Dezimalzeichen (Tausenderpunkte stehen vor drei)."""
+    t = re.sub(r"€|EUR|\s", "", text)
+    t = t[:-3].replace(".", "") + "," + t[-2:] if re.search(r"\.\d{2}$", t) else t
+    t = t.replace(".", "").replace(",", ".")
     try:
         d = Decimal(t)
     except InvalidOperation:
@@ -18,7 +21,7 @@ def betrag(text: str) -> Decimal:
         raise ValueError(f"kein Betrag: {text!r}")
     return d
 def datum(text: str) -> date:
-    return datetime.strptime(text.strip(), "%d.%m.%Y").date()
+    return datetime.strptime(text.strip().replace("O", "0"), "%d.%m.%Y").date()  # O statt 0 (Texterkennung)
 def de(x: Decimal) -> str:
     """Betrag für Fehlermeldungen: 1.234,56"""
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -58,6 +61,7 @@ class Rechnung:
     faellig: date | None = None
     waehrung: str = "EUR"
     vorlage: str = ""
+    ocr_text: str = ""    # gesetzt, wenn per Texterkennung gelesen
 class SummenFehler(ValueError):
     pass
 def summenabgleich(r: Rechnung) -> dict[Decimal, tuple[Decimal, Decimal]]:

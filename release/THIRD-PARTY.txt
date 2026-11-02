@@ -1,0 +1,44 @@
+erechnung-konverter – Fremdsoftware in diesem Paket
+====================================================
+
+Texterkennung (Ordner tesseract\)
+---------------------------------
+Tesseract OCR 5.5.3            Apache License 2.0       https://github.com/tesseract-ocr/tesseract
+  Windows-Build aus conda-forge (win-64, tesseract-5.5.3-he87eeb8_0), unverändert.
+deu.traineddata                Apache License 2.0       https://github.com/tesseract-ocr/tessdata_best
+  Commit e12c65a915945e4c28e237a9b52bc4a8f39a0cec, unverändert.
+
+Mitgelieferte Bibliotheken für tesseract.exe (conda-forge, unverändert, dynamisch gelinkt):
+  Leptonica 1.87.0               BSD-2-Clause
+  libarchive 3.8.11 (lgpl-Build) BSD-2-Clause
+  libcurl 8.23.0                 curl-Lizenz (MIT-artig)
+  OpenSSL 3.6.5 (libcrypto)      Apache License 2.0
+  libssh2 1.11.1                 BSD-3-Clause
+  libxml2 2.15.4                 MIT
+  ICU 78.3                       Unicode-Lizenz (ICU)
+  libiconv 1.18                  LGPL-2.1 (eigene DLL iconv.dll/charset.dll, austauschbar)
+  libtiff 4.7.2                  libtiff-Lizenz (HPND)
+  libpng 1.6.59                  libpng-Lizenz
+  libjpeg-turbo 3.2.1            IJG, BSD-3-Clause, zlib
+  libwebp 1.6.0                  BSD-3-Clause
+  OpenJPEG 2.5.4                 BSD-2-Clause
+  giflib 5.2.2                   MIT
+  LERC 4.3.0                     Apache License 2.0
+  libdeflate 1.25                MIT
+  zlib 1.3.2                     zlib-Lizenz
+  bzip2 1.0.8                    bzip2-Lizenz (BSD-artig)
+  xz/liblzma 5.8.3               0BSD
+  lz4 1.10.0                     BSD-2-Clause
+  zstd 1.5.7                     BSD-3-Clause
+  libpsl 0.23.1                  MIT
+  Microsoft Visual C++ Runtime 14.51 (msvcp140, vcruntime140)  Lizenz für weitervertreibbaren Code von Microsoft
+
+Die vollständigen Lizenztexte liegen je Paket in tesseract\lizenzen\<paket>\
+(aus den conda-Paketen übernommen; Apache 2.0: tesseract\lizenzen\tesseract\tesseract\LICENSE).
+Quellcode: https://github.com/conda-forge/<paket>-feedstock und die oben genannten Projekte.
+
+Python und Python-Pakete (Ordner python\)
+-----------------------------------------
+Python 3.14 (Windows embeddable)  PSF License            python\LICENSE.txt
+Python-Pakete (pdfplumber, pdfminer.six, pypdfium2, lxml, factur-x, pyyaml, pillow, …):
+  Lizenz je Paket in python\Lib\site-packages\<paket>-<version>.dist-info\

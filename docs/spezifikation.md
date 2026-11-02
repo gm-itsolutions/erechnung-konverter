@@ -1,6 +1,6 @@
 # erechnung-konverter – Spezifikation
 
-- **Stand:** 02.11.2026, Version 1 (Durchstich für den Kundentermin am 03.11.2026)
+- **Stand:** 02.11.2026, Version 1 (Durchstich für den Kundentermin am 03.11.2026); Ergänzung 02.11.2026: Senden an (3.3), Texterkennung (3.2)
 - **Projekt:** ai-os `30-projekte/erechnung-konverter.md`, Teilprojekt 2 von gm-update
 - **Repo:** `git.gm-itsolutions.de/gm-itsolutions/erechnung-konverter` (privat), Klon `/root/erechnung-konverter`
 - **Plan:** `docs/plan/index.md`
@@ -48,11 +48,29 @@ Programm des Kunden ── druckt ──> Drucker "E-Rechnung" (Microsoft Print 
 - **Warum nicht anders:** Ein Port mit `PORTPROMPT:` fragt nach einem Namen (nicht unbeaufsichtigt). Ein eigener Port-Monitor oder Treiber wäre C-Code bzw. kostenpflichtig (Entscheidung 30.10.: nur Open Source). Je Auftrag eindeutige Namen kann der lokale Port nicht.
 - **Restrisiko:** Zwei Aufträge direkt hintereinander: Der Spooler rendert den zweiten erst nach dem ersten (Sekunden), der Überwacher verschiebt binnen 0,5 s. Geprüft wird das auf der VM mit fünf Aufträgen in Folge (Task 10). Annahme **[auf VM prüfen]**: Der Spooler öffnet die Datei ohne `FILE_SHARE_DELETE`.
 - Ob der Spooler die Datei als SYSTEM oder im Kontext des druckenden Benutzers schreibt, ist nicht belegt **[auf VM prüfen]**. Deshalb haben Benutzer im Ordner `Eingang` vorerst Ändern-Rechte (Abschnitt 6). Braucht der Spooler sie nicht, werden sie in Task 10 entfernt.
-- Jedes PDF, das auf anderem Weg in `Eingang` landet (Kopieren), wird genauso verarbeitet. Das ist der Ausweichweg, wenn ein Programm nicht drucken kann.
+- Jedes PDF, das auf anderem Weg in `Eingang` landet (Kopieren, „Senden an“, Abschnitt 3.3), wird genauso verarbeitet: jede Datei mit Endung `.pdf` (Groß-/Kleinschreibung egal), nicht nur `rechnung.pdf`. Andere Dateien bleiben liegen.
 
 ### 3.2 Textlage beim Drucken
 
-Ein Programm, das Text als Text druckt (GDI, Browser, Office), liefert ein PDF mit Text. Programme, die Seiten als Bild drucken (z. B. SumatraPDF druckt gerastert), liefern kein lesbares PDF. Der Überwacher erkennt „kein Text“ und schreibt einen Fehler mit diesem Grund. OCR ist nicht vorgesehen.
+Ein Programm, das Text als Text druckt (GDI, Office, `Out-Printer`), liefert ein PDF mit Text. Programme, die Seiten als Bild drucken, liefern ein PDF ohne Text: belegt für **PDFs aus Edge** auf VM 108 (Marvin, 02.11.2026), ebenso SumatraPDF. Dafür gibt es zwei Wege:
+
+1. **Senden an → E-Rechnung** (Abschnitt 3.3): Das Original-PDF mit Text kommt an, keine Texterkennung nötig. Bevorzugter Weg für vorhandene PDFs.
+2. **Texterkennung (OCR) als Rückfall** (`erechnung/ocr.py`), wenn das PDF weniger als 20 Buchstaben/Ziffern enthält (`vorlagen.MIN_ZEICHEN`):
+   - Jede Seite mit pypdfium2 (Abhängigkeit von pdfplumber, schon im Paket) als Graustufenbild mit 300 dpi rendern (längste Kante höchstens 6000 px), höchstens 20 Seiten.
+   - `tesseract.exe <bild> <ausgabe> -l deu --psm 6 --dpi 300` per `subprocess` ohne Shell, ohne Konsolenfenster, Frist 120 s je Seite. Bilder und Text in einem temporären Ordner `ocr-*` im Arbeitsordner der App, danach gelöscht (Reste beim Start des Überwachers).
+   - Text bereinigen: Tabellenrahmen `|`, doppelte Leerzeichen, Leerzeilen. **Ziffern werden nie geändert.**
+   - Danach dieselbe Vorlagenlogik und derselbe Pflicht-Summenabgleich. Jeder Fehler endet mit „(per Texterkennung gelesen)“ in der Fehlerdatei.
+   - Erfolg: Die E-Rechnung bettet die XML in das **Original-PDF (Bild)** ein, es bleibt die Sichtkomponente. Daneben `<Nummer>.ocr.txt` mit Hinweis und erkanntem Text; im Log „per Texterkennung gelesen“.
+   - Tesseract fehlt (z. B. Entwicklung ohne Tesseract): Fehler „kein Text im PDF …, Texterkennung nicht verfügbar“.
+   - **Grenze:** Der Summenabgleich sichert die Beträge, nicht Nummer, Daten und Käufer. Deshalb in der Vorlage: Nummer nur `RE\d+` und eine zweite Fundstelle (`nummer_kontrolle`, Überschrift „Rechnung RE…“) muss übereinstimmen; `O` statt `0` wird nur in Datumsangaben ersetzt. Mit `tessdata_fast` las Tesseract bei zwei von drei echten Rechnungen „REO0146“ statt „RE0146“ (beide Fundstellen gleich falsch) – darum `tessdata_best` (4.1) und das enge Nummernmuster, das so einen Fall zum Fehler macht.
+
+Ergebnis auf gm-claude (Tesseract 5.5.0, `tessdata_best`): Die drei echten Lexware-Rechnungen RE0146, RE0148, RE0149 als Bild-PDF ohne Text (300 und 200 dpi) liefern Nummer, Netto, Steuer, Brutto, alle Positionsbeträge und Fälligkeit **identisch mit der Lexware-XML** (`tests/test_lexware_echt.py::test_ocr_wie_lexware`). Laufzeit rund 7 s je Seite.
+
+### 3.3 Senden an
+
+`einrichten.ps1` legt in jedem vorhandenen Benutzerprofil (`Win32_UserProfile`, ohne Systemprofile) und im Default-Profil (für neue Benutzer, Pfad aus `HKLM\…\ProfileList\Default`) die Verknüpfung `AppData\Roaming\Microsoft\Windows\SendTo\E-Rechnung.lnk` → `<Daten>\Eingang` an. Wiederholbar (wird überschrieben). Ist ein SendTo-Ordner eine Junction/ein Symlink, wird er mit Warnung übersprungen. Umgeleitete AppData-Ordner (Ordnerumleitung im Netz) werden nicht erfasst.
+
+Halb kopierte Dateien: Der Explorer schreibt die Zieldatei unter ihrem endgültigen Namen und hält sie bis zum Ende offen (CopyFileEx, ohne `FILE_SHARE_DELETE` **[auf VM prüfen]**). `os.replace` scheitert dann wie beim Spooler mit einer Freigabeverletzung, der nächste Takt versucht es erneut. Greift das nicht, fehlt am Dateiende `%%EOF` (CopyFileEx legt die Zielgröße vorab an, das Ende ist noch leer) → Fehlerdatei „PDF unvollständig“; die Quelldatei des Benutzers bleibt unberührt. Ob „Senden an“ auf demselben Laufwerk kopiert oder verschiebt, ist **[auf VM prüfen]** (erwartet: kopieren). Namenskollisionen: Arbeitsdateien bekommen einen Zeitstempel mit Mikrosekunden, Ziele in `E-Rechnungen`, `Originale`, `Fehler` ein `-2`, `-3` … (`_frei`).
 
 ## 4. Komponenten
 
@@ -61,7 +79,8 @@ Ein Programm, das Text als Text druckt (GDI, Browser, Office), liefert ein PDF m
 | `erechnung/__init__.py` | `__version__` (setzt der Bau aus dem Tag) |
 | `erechnung/__main__.py` | CLI: `--version`, `ueberwachen --konfig`, `umwandeln <pdf> --konfig` |
 | `erechnung/modell.py` | Datenklassen `Partei`, `Position`, `Rechnung`; `betrag()`, `datum()`; `summenabgleich()` |
-| `erechnung/vorlagen.py` | `pdf_text()`, `lade_vorlagen()`, `finde_vorlage()`, `lies_rechnung()` |
+| `erechnung/vorlagen.py` | `pdf_text()`, `lade_vorlagen()`, `finde_vorlage()`, `lies_rechnung(…, ocr=None)` |
+| `erechnung/ocr.py` | `tesseract()` (Aufruf finden), `erkenne(pdf, arbeit, aufruf)`, `bereinige()` |
 | `erechnung/cii.py` | `erzeuge_cii()` (CII-XML, EN16931) |
 | `erechnung/ueberwachen.py` | `Konfig`, `lade_konfig()`, `verarbeite()`, `schritt()`, `ueberwache()` |
 | `erechnung/vorlagen/*.yml` | eine Vorlage je Layout |
@@ -83,6 +102,8 @@ Ein Programm, das Text als Text druckt (GDI, Browser, Office), liefert ein PDF m
 | Programm- und Konfigurationsdateien unter `%ProgramFiles%\GM-IT\erechnung-konverter` | wie gm-update: Benutzer können dort nichts vorab anlegen. `konfig.json`, `arbeit\` und `erechnung.log` liegen neben `versionen\`, ein Update ersetzt sie nicht. |
 | Stopp/Start über PowerShell `Stop-/Start-ScheduledTask` statt `schtasks /End` | Scheitert `stopp`, verwirft gm-update die neue Version. `schtasks /End` meldet bei nicht laufender Aufgabe womöglich einen Fehler **[n. o. b.]**; `Stop-ScheduledTask` ist dann still. Auf der VM geprüft (Task 10). |
 | Validierung mit **Mustang-CLI** auf gm-claude (Java 21 vorhanden), in der CI nur XSD über factur-x | Mustang prüft XSD **und** EN16931-Schematron. Der CI-Runner hat kein Java; Mustang je Lauf zu laden lohnt nicht. Mustang-Lauf ist Teil von Task 8 und vor jeder Freigabe. |
+| **Tesseract 5.5.3 aus conda-forge (win-64)** statt UB-Mannheim-Installer | conda-forge: jede Datei (`.conda`) mit SHA-256 aus der Repodata, auf Linux mit der Python-Standardbibliothek entpackbar (zip + `tarfile` mit zstd, Python 3.14), Abhängigkeiten reproduzierbar aufgelöst (py-rattler) und in `release/tesseract-windows.txt` fest gepinnt. Der UB-Mannheim-Installer ist ein NSIS-Setup (7z im CI nötig), bündelt seine DLLs ohne einzelne Prüfsummen und hat keine von uns prüfbare Herkunftskette außer dem Hash der Gesamtdatei. `libarchive` in der lgpl-Variante (die gpl-Variante zieht lzo, GPL-2.0). Ins Paket kommt nur die Importhülle von `tesseract.exe` (31 Dateien, mit objdump bestimmt; `conda_entpacken.py` bricht ab, wenn eine fehlt) plus alle Lizenztexte. |
+| **`deu.traineddata` aus `tessdata_best`** (Commit `e12c65a…`, 8,6 MB) statt `tessdata_fast` (1,5 MB) | Gemessen an den drei echten Rechnungen als Bild-PDF: `best` liest alle Nummern und Beträge richtig, `fast` liest „RE0146“ als „REO0146“ und verliert eine Position (Summenabgleich fängt es, aber dann gibt es keine E-Rechnung). Laufzeit `best` rund 7 s je Seite, für Einzelrechnungen unkritisch. |
 | Echte Testdaten **außerhalb des Repos** in `/root/erechnung-testdaten/` (0700), synthetische im Repo | Die Lexware-Rechnungen enthalten Namen und Anschriften von Marvins Kunden. Tests mit echten Daten laufen nur, wenn `ERECHNUNG_TESTDATEN` gesetzt ist (gm-claude), sonst übersprungen. Die CI testet mit einem synthetischen Text im selben Layout (Namen ersetzt) und einem mit reportlab erzeugten PDF. |
 
 ## 5. Vorlagen
@@ -112,6 +133,8 @@ positionen:
   ignorieren: ['^Seite \d+']       # Zeilen, die nie Fortsetzung sind
 einheiten: {Stunde: HUR, Std.: HUR, Stück: H87, Pauschal: C62}   # sonst C62
 ```
+
+Optional `felder.nummer_kontrolle`: zweite Fundstelle der Nummer; ist der Schlüssel gesetzt, muss sie gefunden werden und gleich sein (sonst „Rechnungsnummer uneinheitlich gelesen“). Schlüsselwörter werden ohne Leerzeichen verglichen. `betrag()` liest `€`/`EUR`, Leerzeichen und einen Punkt vor genau zwei Endziffern als Dezimalzeichen (`1.557.21`), `datum()` ersetzt `O` durch `0`. Die Vorlage `lexware-gm-it.yml` ist auf Texterkennung abgestimmt (Abschnitt 3.2).
 
 Regeln: Genau eine Vorlage muss passen, sonst Fehler („keine Vorlage“ / „mehrere Vorlagen: a, b“). Zeilen zwischen `start` und `ende`, die nicht auf `zeile` passen, nicht leer sind und nicht unter `ignorieren` fallen, werden an die Bezeichnung der vorigen Position angehängt. Endet die Bezeichnung auf Wort + `-`, gilt: Folgezeile beginnt klein → Silbentrennung, Strich entfällt („Dokumentenscan-“ + „ner“); beginnt sie mit „und/oder/bzw./sowie“ → Strich bleibt, mit Leerzeichen („Einzugs- und …“); sonst Strich bleibt ohne Leerzeichen („E-Mail-“ + „Postfach“). Ein mehrzeiliger Käufername (Zusatzzeile unter der Firma) wird nicht zusammengesetzt, nur die erste Zeile gilt als Name. Zusätzliche Vorlagen ohne Release: Ordner `vorlagen\` neben `konfig.json` (nur Administratoren schreiben).
 
@@ -156,13 +179,13 @@ Jede Verletzung → `SummenFehler` mit Klartext (z. B. „Netto: Positionen 1.19
 
 ## 9. Installation und Update (gm-update)
 
-- Art `datei`, ZIP `erechnung-konverter-<v>-windows-amd64.zip` mit `python\` (Embeddable + `Lib\site-packages`), `app\erechnung\`, `einrichten\`. `python314._pth` enthält `python314.zip`, `.`, `Lib\site-packages`, `..\app`.
+- Art `datei`, ZIP `erechnung-konverter-<v>-windows-amd64.zip` mit `python\` (Embeddable + `Lib\site-packages`), `app\erechnung\`, `einrichten\`, `tesseract\` (`tesseract.exe`, DLLs, `tessdata\deu.traineddata`, `lizenzen\`) und `THIRD-PARTY.txt`. Größe 0.1.x ohne Tesseract 45,8 MB, mit 76,5 MB (Bau 02.11.2026). `python314._pth` enthält `python314.zip`, `.`, `Lib\site-packages`, `..\app`.
 - `gm-update.json` (in `einrichten/`):
   - `probe`: `["aktuell/python/python.exe", "-m", "erechnung", "--version"]` – importiert alle Abhängigkeiten, Frist 60 s
   - `stopp`/`start`: `Stop-`/`Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung'`
 - Eigenes `gm-update.exe` als SYSTEM-Aufgabe `GM-IT\Update erechnung-konverter` (legt `gm-update installieren` an). Version **0.1.4** (mit PR #6: Token und Konfiguration mit eingeschränkter DACL angelegt, Ordnerprüfung vor dem Anlegen, ProgramFilesDir aus HKLM).
 - Lesetoken je Kunde `update-<kunde>`, im Test `update-test` (`/root/.config/gm-it-os/update-test.token`).
-- CI: `.forgejo/workflows/release.yml` nach gm-update-Vorlage, `release/bauen.sh` lädt Python-Embed mit fester SHA-256 und installiert Wheels mit `--require-hashes --no-deps --only-binary=:all: --platform win_amd64 --python-version 3.14 --target`.
+- CI: `.forgejo/workflows/release.yml` nach gm-update-Vorlage, `release/bauen.sh` lädt Python-Embed mit fester SHA-256 und installiert Wheels mit `--require-hashes --no-deps --only-binary=:all: --platform win_amd64 --python-version 3.14 --target`, lädt die conda-Pakete aus `release/tesseract-windows.txt` und `deu.traineddata` (Commit und SHA-256 in `bauen.sh`) und bricht bei jeder abweichenden Prüfsumme ab.
 
 ## 10. Grundschutz-Abgleich
 
@@ -187,7 +210,8 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 | DET.3.1 | Protokollierung | `erechnung.log` je Datei: Eingang, Vorlage, Ergebnis/Fehler; `gm-update.log` |
 | NOT.4.15 | Wiederherstellungsweg | Runbook `docs/einrichten.md`: Neuinstallation mit `einrichten.ps1`, vorige Version über gm-update-Rückweg; Originale bleiben in `Originale` |
 | ASST.2.3 | Inventar der Anwendungen | Version in `stand.json`; Python- und Paketversionen in `release/requirements-windows.txt` |
-| DEV / TEST (IDs im Katalog nachschlagen **[n. o. b.]**) | Sichere Entwicklung, Tests vor Freigabe | pytest in der CI, Mustang-Prüfung vor jeder Freigabe, Lieferkette: Hashes für Python-Embed und alle Wheels |
+| DEV / TEST (IDs im Katalog nachschlagen **[n. o. b.]**) | Sichere Entwicklung, Tests vor Freigabe | pytest in der CI, Mustang-Prüfung vor jeder Freigabe, Lieferkette: Hashes für Python-Embed, alle Wheels, alle Tesseract-Pakete und `deu.traineddata` |
+| ASST.2.3 / DEV (Lieferkette) | **Neue Fremdsoftware Tesseract** (Freigabe Marvin, 02.11.2026) | Herkunft: conda-forge win-64 (`https://conda.anaconda.org/conda-forge/win-64/…`), 24 Pakete mit SHA-256 aus der Repodata in `release/tesseract-windows.txt`; Tesseract 5.5.3 (`he87eeb8_0`, SHA-256 `edbe2455…e024`); `deu.traineddata` aus `github.com/tesseract-ocr/tessdata_best`, Commit `e12c65a915945e4c28e237a9b52bc4a8f39a0cec`, SHA-256 `8407331d…f0d06e`. Lizenzen: Apache 2.0 (Tesseract, tessdata, OpenSSL, LERC), sonst BSD/MIT/zlib-artig, libiconv LGPL-2.1 als eigene DLL; Liste `THIRD-PARTY.txt`, Texte in `tesseract\lizenzen\`. Aktualisierung nur mit neuer Pinliste und neuem Release |
 | X.1.1.2 / BER.3.6 | Zuständigkeiten, Admin-Konten | Einrichtung nur durch GM IT mit Admin-Konto; keine eigenen Konten der App |
 
 **Abweichungen:**
@@ -199,7 +223,7 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 | A3 | DET.5.10.2 | Keine Monitoring-Anbindung von `stand.json` und Fehlern | Durchstich zuerst | temporär |
 | A4 | BER.4.1 | Benutzer haben Ändern-Recht in `Eingang` | Spooler-Kontext unbelegt (3.1) | temporär, Klärung in Task 10 |
 
-**Restrisiken:** Manipuliertes PDF könnte eine Lücke im Parser als SYSTEM ausnutzen (A1). Jeder lokale Benutzer kann eine E-Rechnung aus einem beliebigen PDF erzeugen lassen (gewollt, entspricht dem Drucken).
+**Restrisiken:** Manipuliertes PDF könnte eine Lücke im Parser als SYSTEM ausnutzen (A1); mit der Texterkennung kommen pdfium (Rendern) und Tesseract/Leptonica (liest nur das selbst erzeugte PNG) hinzu, ebenfalls als SYSTEM. Begrenzung: höchstens 20 Seiten, 6000 px, 120 s je Seite. Per Texterkennung gelesene Nummer, Daten und Käufer sichert kein Summenabgleich (Gegenmaßnahmen 3.2, Hinweisdatei `.ocr.txt`). Jeder lokale Benutzer kann eine E-Rechnung aus einem beliebigen PDF erzeugen lassen (gewollt, entspricht dem Drucken).
 
 ## 11. Offene Punkte
 
@@ -209,6 +233,7 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 4. Monitoring (A3), Konto `LOCAL SERVICE` (A1).
 5. XRechnung (UBL/CII mit Leitweg-ID) für öffentliche Auftraggeber.
 6. Empfang eingehender E-Rechnungen (Projektziel Teil 2).
+7. VM 108: Texterkennung mit dem gepackten `tesseract.exe` (DLL-Hülle, Laufzeit als SYSTEM), Druck aus Edge Ende-zu-Ende, „Senden an“ (kopiert oder verschiebt? Freigabeverletzung bei Explorer-Kopie?), Profil neuer Benutzer.
 
 ## 12. Abnahme Durchstich
 
