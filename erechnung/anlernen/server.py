@@ -1,5 +1,5 @@
 """Lokale Anlern-Oberfläche, nur 127.0.0.1, Benutzerkontext (docs/lernmodus/spezifikation.md 3)."""
-import hmac, json, logging, os, re, secrets, threading, time
+import hmac, json, logging, os, re, secrets, socket, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -7,6 +7,7 @@ from ..ueberwachen import lade_konfig
 log = logging.getLogger("erechnung.anlernen")
 STATISCH = Path(__file__).parent / "statisch"
 NAME, MUSTER = re.compile(r"[a-z0-9][a-z0-9-]{1,39}"), re.compile(r"m[0-9]{1,3}")
+GERAETE = {"con", "prn", "aux", "nul", *(f"{g}{i}" for g in ("com", "lpt") for i in range(1, 10))}   # Windows-Gerätenamen
 MAX_PDF, MAX_JSON, LEERLAUF, TOKEN_FRIST = 10 * 1024 * 1024, 64 * 1024, 30 * 60, 60
 TYPEN = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".json": "application/json"}
@@ -24,6 +25,9 @@ class Zustand:
         self.token, self.token_bis = secrets.token_urlsafe(32), time.monotonic() + TOKEN_FRIST
         self.sitzung, self.csrf, self.letzte = None, secrets.token_urlsafe(32), time.monotonic()
         self.statisch = {"/statisch/" + p.relative_to(STATISCH).as_posix(): p for p in STATISCH.rglob("*") if p.is_file()}
+def gleich(a: str, b: str) -> bool:
+    """Zeitkonstanter Vergleich; Nicht-ASCII ergibt False statt TypeError."""
+    return hmac.compare_digest(a.encode(), b.encode())
 def leerlauf_vorbei(z, jetzt: float) -> bool:
     return jetzt - z.letzte > LEERLAUF
 ROUTEN: list = []      # (Methode, Muster, Funktion, ändernd)
@@ -49,7 +53,7 @@ def lies_json(handler) -> dict:
         raise Fehler(400, "JSON-Objekt erwartet")
     return obj
 def _name(name) -> str:
-    if not isinstance(name, str) or not NAME.fullmatch(name):
+    if not isinstance(name, str) or not NAME.fullmatch(name) or name in GERAETE:
         raise Fehler(400, "Name ungültig: 2–40 Zeichen a–z, 0–9, Bindestrich")
     return name
 def entwurf_ordner(z, name) -> Path:
@@ -60,8 +64,9 @@ def entwurf_ordner(z, name) -> Path:
 class Handler(BaseHTTPRequestHandler):
     server_version = "erechnung"
     sys_version = ""
+    timeout = 30            # hängende Clients (falsche Content-Length) halten keinen Thread fest
     def log_message(self, fmt, *a):
-        log.info("%s %s", self.command, self.path.split("?")[0])        # nie den Token loggen
+        log.info("%s %s", getattr(self, "command", ""), getattr(self, "path", "").split("?")[0])   # nie den Token loggen
     def _senden(self, status, typ, daten, extra=()):
         self.send_response(status)
         for k, w in (("Content-Type", typ), ("Content-Length", str(len(daten))), ("Content-Security-Policy", CSP),
@@ -72,22 +77,22 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(daten)
     def _bearbeiten(self):
         z = self.server.z
-        z.letzte = time.monotonic()
         try:
             if self.headers.get("Host") != z.host:
                 raise Fehler(421, "falscher Host")
             pfad = urlsplit(self.path).path
             if self.command == "GET" and pfad == "/start":
                 t = parse_qs(urlsplit(self.path).query).get("t", [""])[0]
-                if z.token is None or time.monotonic() > z.token_bis or not hmac.compare_digest(t, z.token):
+                if z.token is None or time.monotonic() > z.token_bis or not gleich(t, z.token):
                     raise Fehler(403, "Start-Link ungültig oder schon benutzt")
-                z.token, z.sitzung = None, secrets.token_urlsafe(32)
+                z.token, z.sitzung, z.letzte = None, secrets.token_urlsafe(32), time.monotonic()
                 return self._senden(303, "text/plain", b"", (("Location", "/"),
                                     ("Set-Cookie", f"sitzung={z.sitzung}; HttpOnly; SameSite=Strict; Path=/")))
             keks = dict(c.strip().split("=", 1) for c in self.headers.get("Cookie", "").split(";") if "=" in c)
-            if z.sitzung is None or not hmac.compare_digest(keks.get("sitzung", ""), z.sitzung):
+            if z.sitzung is None or not gleich(keks.get("sitzung", ""), z.sitzung):
                 raise Fehler(403, "keine Sitzung, bitte über das Startmenü öffnen")
-            if self.command != "GET" and (not hmac.compare_digest(self.headers.get("X-CSRF", ""), z.csrf)
+            z.letzte = time.monotonic()         # erst nach Host- und Sitzungsprüfung: Fremde halten den Server nicht wach
+            if self.command != "GET" and (not gleich(self.headers.get("X-CSRF", ""), z.csrf)
                                           or self.headers.get("Origin") != f"http://{z.host}"):
                 raise Fehler(403, "CSRF-Prüfung fehlgeschlagen")
             if self.command == "GET" and pfad == "/":
@@ -128,8 +133,15 @@ def _entwurf_neu(h, z):
 def _beenden(h, z):
     threading.Thread(target=h.server.shutdown, daemon=True).start()
     return json_antwort({"ok": True})
+class Server(ThreadingHTTPServer):
+    """Ohne SO_REUSEADDR (unter Windows erlaubt es Mitbinden fremder Prozesse); Windows: SO_EXCLUSIVEADDRUSE."""
+    allow_reuse_address = False
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 def erstelle_server(konfig: Path, daten: Path):
-    s = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    s = Server(("127.0.0.1", 0), Handler)
     s.z = Zustand(konfig, daten, s.server_address[1])
     return s, f"http://{s.z.host}/start?t={s.z.token}"
 def starte(konfig: Path, daten: Path | None = None, oeffnen: bool = True) -> None:

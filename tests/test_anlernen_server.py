@@ -1,4 +1,4 @@
-import http.client, json, threading
+import http.client, json, socket, threading, time
 from pathlib import Path
 import pytest
 from erechnung import __main__ as cli
@@ -76,7 +76,7 @@ def test_sicherheitskoepfe(lauf):
     assert k["X-Content-Type-Options"] == "nosniff" and k["Referrer-Policy"] == "same-origin"
     assert k["Cache-Control"] == "no-store"
     assert s.z.csrf.encode() in html and b"<script>" not in html
-@pytest.mark.parametrize("name", ["../x", "A", "a" * 41, "a/b"])
+@pytest.mark.parametrize("name", ["../x", "A", "a" * 41, "a/b", "con", "nul", "com1", "lpt9"])
 def test_namen_abgelehnt(lauf, name):
     s, url, _ = lauf
     _, schreibe = anmelden(s, url)
@@ -92,6 +92,37 @@ def test_beenden(lauf):
     s, url, _ = lauf
     _, schreibe = anmelden(s, url)
     assert anfrage(s, "POST", "/api/beenden", b"", schreibe)[0] == 200
+def test_kein_mitbinden(lauf):
+    s, _, _ = lauf
+    assert not s.socket.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
+    fremd = socket.socket()
+    fremd.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    with fremd, pytest.raises(OSError):
+        fremd.bind(s.server_address)
+def test_nicht_ascii_403(lauf):
+    s, url, _ = lauf
+    assert anfrage(s, "GET", "/start?t=%C3%A4")[0] == 403
+    _, schreibe = anmelden(s, url)
+    assert anfrage(s, "GET", "/", kopf={"Cookie": "sitzung=\u00e4".encode().decode("latin-1")})[0] == 403
+    kopf = {**schreibe, "X-CSRF": "\u00e4".encode("latin-1").decode("latin-1")}
+    assert anfrage(s, "POST", "/api/entwurf", b'{"name": "ab"}', kopf)[0] == 403
+def test_fremde_halten_nicht_wach(lauf):
+    s, url, _ = lauf
+    s.z.letzte = 0.0
+    anfrage(s, "GET", "/api/stand")
+    anfrage(s, "GET", "/api/stand", kopf={"Host": "evil.example"})
+    assert s.z.letzte == 0.0
+    lese, _ = anmelden(s, url)
+    s.z.letzte = 0.0
+    anfrage(s, "GET", "/api/stand", kopf=lese)
+    assert s.z.letzte > 0.0
+def test_kaputte_anfragezeile_beantwortet(lauf):
+    s, _, _ = lauf
+    with socket.create_connection(s.server_address, timeout=10) as c:
+        c.sendall(b"GET /" + b"a" * 70000 + b" HTTP/1.1\r\n\r\n")       # Anfragezeile zu lang: self.path fehlt
+        assert c.recv(100).startswith(b"HTTP/1.0 414")
+def test_handler_timeout():
+    assert srv.Handler.timeout == 30
 def test_leerlauf():
     z = type("Z", (), {"letzte": 100.0})()
     assert not srv.leerlauf_vorbei(z, 100.0 + srv.LEERLAUF - 1) and srv.leerlauf_vorbei(z, 100.0 + srv.LEERLAUF + 1)
