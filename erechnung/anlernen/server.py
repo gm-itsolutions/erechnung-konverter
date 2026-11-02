@@ -6,14 +6,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 import pypdfium2 as pdfium
-from ..bereiche import FELDER, BereichsFehler, Wort, _betrag, _datum, _feld, _nummer, _tage, feld_text, woerter_aus_pdf
+from ..bereiche import FELDER, GERAETE, BereichsFehler, Wort, _betrag, _datum, _feld, _nummer, _tage, feld_text, woerter_aus_pdf
 from ..modell import de
 from ..ueberwachen import lade_konfig
 from ..vorlagen import MIN_ZEICHEN, pdf_text
 log = logging.getLogger("erechnung.anlernen")
 STATISCH = Path(__file__).parent / "statisch"
 NAME, MUSTER = re.compile(r"[a-z0-9][a-z0-9-]{1,39}"), re.compile(r"m[0-9]{1,3}")
-GERAETE = {"con", "prn", "aux", "nul", *(f"{g}{i}" for g in ("com", "lpt") for i in range(1, 10))}   # Windows-Gerätenamen
 MAX_HOEHE = 6000    # Pixel; 1400 breit, A4 = 1980
 MAX_SEITEN, DATEINAME = 20, re.compile(r"[\w .-]{1,80}")
 LESER = {"nummer": _nummer, "nummer_kontrolle": _nummer, "datum": _datum, "leistungsdatum": _datum, "faellig": _datum,
