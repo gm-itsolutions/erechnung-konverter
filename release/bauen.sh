@@ -10,10 +10,15 @@ PY_SHA256=90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159
 TESSDATA_COMMIT=e12c65a915945e4c28e237a9b52bc4a8f39a0cec
 DEU_SHA256=8407331d6aa0229dc927685c01a7938fc5a641d1a9524f74838cdac599f0d06e
 PIP="${PIP:-python3 -m pip}"
+# Python-Embed und deu.traineddata kommen aus dem eigenen Spiegel (Forgejo-Paketablage, Paket-Token in PAKET_TOKEN).
+# Neue Version spiegeln: Original laden, SHA-256 prüfen, per PUT nach .../generic/<paket>/<version>/<datei> hochladen.
+SPIEGEL="${GITHUB_SERVER_URL:-https://git.gm-itsolutions.de}/api/packages/gm-itsolutions/generic"
+hole() { curl -fsSL -H "Authorization: token $PAKET_TOKEN" -o "$2" "$SPIEGEL/$1"; }
 B=build/windows-amd64
 rm -rf build
 mkdir -p "$B/python" "$B/app" dist
-curl -fsSL -o build/python-embed.zip "https://www.python.org/ftp/python/$PY/python-$PY-embed-amd64.zip"
+# Original: https://www.python.org/ftp/python/$PY/python-$PY-embed-amd64.zip
+hole "python-embed/$PY/python-$PY-embed-amd64.zip" build/python-embed.zip
 echo "$PY_SHA256  build/python-embed.zip" | sha256sum -c -
 python3 -m zipfile -e build/python-embed.zip "$B/python"
 $PIP install --quiet --no-deps --require-hashes --only-binary=:all: \
@@ -27,8 +32,8 @@ grep -v '^#' release/tesseract-windows.txt | while read -r url sha; do
   echo "$sha  $f" | sha256sum -c --quiet -
 done
 python3 -I release/conda_entpacken.py "$B/tesseract" build/conda/*.conda
-curl -fsSL -o "$B/tesseract/tessdata/deu.traineddata" \
-  "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/$TESSDATA_COMMIT/deu.traineddata"
+# Original: https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/$TESSDATA_COMMIT/deu.traineddata
+hole "tessdata-best/$TESSDATA_COMMIT/deu.traineddata" "$B/tesseract/tessdata/deu.traineddata"
 echo "$DEU_SHA256  $B/tesseract/tessdata/deu.traineddata" | sha256sum -c -
 cp release/THIRD-PARTY.txt "$B/"
 printf 'python314.zip\n.\nLib\\site-packages\n..\\app\n' > "$B/python/python314._pth"

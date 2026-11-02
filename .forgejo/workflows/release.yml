@@ -32,9 +32,8 @@ jobs:
             "$GITHUB_SERVER_URL/api/packages/gm-itsolutions/generic/gm-update/$GM_UPDATE_VERSION/$f"
           echo "$GM_UPDATE_SHA256  /usr/local/bin/gm-update" | sha256sum -c -
           chmod 0755 /usr/local/bin/gm-update
-      - uses: https://git.gm-itsolutions.de/gm-actions/actions-setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: '3.14'
+      # Python 3.14 liegt im Job-Image (gm-actions/ci-ubuntu), kein Download mehr
+      - run: python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
       - name: Tests
         run: |
           set -euo pipefail
@@ -42,6 +41,8 @@ jobs:
           python -m pytest -q
       - name: Bauen (Datei)
         if: hashFiles('Dockerfile') == ''
+        env:
+          PAKET_TOKEN: ${{ secrets.PAKET_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist

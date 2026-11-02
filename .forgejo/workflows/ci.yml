@@ -9,16 +9,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: https://git.gm-itsolutions.de/gm-actions/actions-checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: https://git.gm-itsolutions.de/gm-actions/actions-setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: '3.14'
+      # Python 3.14 liegt im Job-Image (gm-actions/ci-ubuntu), kein Download mehr
+      - run: python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
   paket:
     runs-on: ubuntu-latest
     steps:
       - uses: https://git.gm-itsolutions.de/gm-actions/actions-checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: https://git.gm-itsolutions.de/gm-actions/actions-setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: '3.14'
+      # Python 3.14 liegt im Job-Image (gm-actions/ci-ubuntu), kein Download mehr
+      - run: python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
       - run: sh release/bauen.sh 0.0.0
+        env:
+          PAKET_TOKEN: ${{ secrets.PAKET_TOKEN }}
