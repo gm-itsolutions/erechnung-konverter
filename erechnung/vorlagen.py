@@ -1,4 +1,5 @@
 """Vorlagen je Layout (YAML, angelehnt an invoice2data) → Rechnung. Spezifikation Abschnitt 5."""
+import logging
 import re
 from datetime import timedelta
 from decimal import Decimal
@@ -6,7 +7,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 import pdfplumber
 import yaml
+from .bereiche import BereichsFehler, pruefe_bereichsvorlage
 from .modell import Nachlass, Partei, Position, Rechnung, betrag, datum, summenabgleich
+log = logging.getLogger("erechnung")
+MAX_BYTES = 64 * 1024
 STANDARD = Path(__file__).parent / "vorlagen"
 PFLICHT = ("nummer", "datum", "summe_netto", "summe_brutto")
 MIN_ZEICHEN = 20          # weniger Buchstaben/Ziffern im PDF → Bild → Texterkennung
@@ -17,6 +21,11 @@ def pdf_text(pdf: Path, layout: bool = False) -> str:
     with pdfplumber.open(pdf) as d:
         return "\n".join(s.extract_text(layout=layout) or "" for s in d.pages)
 def _pruefe(v: dict, datei: Path) -> dict:
+    if v.get("art") == "bereiche":
+        try:
+            return pruefe_bereichsvorlage(v)
+        except BereichsFehler as e:
+            raise VorlagenFehler(f"Vorlage {datei.name}: {e}") from None
     try:
         assert v.get("name") and v.get("schluesselwoerter"), "name/schluesselwoerter fehlen"
         assert all(f in v.get("felder", {}) for f in PFLICHT), f"felder brauchen {', '.join(PFLICHT)}"
@@ -30,12 +39,19 @@ def _pruefe(v: dict, datei: Path) -> dict:
     except (AssertionError, re.error) as e:
         raise VorlagenFehler(f"Vorlage {datei.name}: {e}") from None
     return v
-def lade_vorlagen(*ordner: Path) -> list[dict]:
+def lade_vorlagen(*ordner: Path, tolerant: bool = False) -> list[dict]:
     vorlagen = []
     for o in ordner:
         if o.is_dir():
             for datei in sorted(o.glob("*.yml")):
-                vorlagen.append(_pruefe(yaml.safe_load(datei.read_text(encoding="utf-8")) or {}, datei))
+                try:
+                    if datei.stat().st_size > MAX_BYTES:
+                        raise VorlagenFehler(f"Vorlage {datei.name}: zu groß (höchstens {MAX_BYTES} Byte)")
+                    vorlagen.append(_pruefe(yaml.safe_load(datei.read_text(encoding="utf-8")) or {}, datei))
+                except (VorlagenFehler, yaml.YAMLError, UnicodeDecodeError) as e:
+                    if not tolerant:
+                        raise VorlagenFehler(str(e)) from None
+                    log.warning("Vorlage übersprungen: %s: %s", datei, e)
     return vorlagen
 def finde_vorlage(text: str, vorlagen: list[dict]) -> dict:
     kompakt = "".join(text.split())                         # Leerzeichen egal (Texterkennung)
