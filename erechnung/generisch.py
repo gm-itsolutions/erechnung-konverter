@@ -399,11 +399,23 @@ def _satz(s: Decimal) -> Decimal:
 
 
 # ---------------------------------------------------------------- Käufer
-PLZ_RE = re.compile(r"^(?:(?:D|DE|A|AT|CH|F|FR|NL|B|L)[- ])?(\d{4,5})\s+([A-ZÄÖÜ][\w\-. ()]*)$")
-KAEUFER_LABEL = _re(r"rechnungsempfänger", r"rechnungsadresse", r"käufer", r"leistungsempfänger", r"bill\s+to",
-                    r"invoice\s+to", r"buyer", r"\bkunde\b", r"customer", r"empfänger", r"client")
+PLZ_RE = re.compile(r"^(?:(?:D|DE|A|AT|CH|F|FR|NL|B|L)[- ])?(\d{4,5})\s*([A-ZÄÖÜ][\w\-. ()]*)$")
+ABSENDER = re.compile(r"[·•●|,–]\s*(?:[A-Z]{1,2}[- ])?\d{4,5}\s+[A-ZÄÖÜ]")   # „Firma · Weg 1 · 12345 Ort“
+KAEUFER_LABEL = _re(r"rechnungsempfänger", r"rechnungsadresse", r"(?<!ver)käufer", r"leistungsempfänger", r"bill\s+to",
+                    r"invoice\s+to", r"buyer", r"(?<![\w-])kunde\b", r"customer", r"(?<!waren)empfänger", r"client",
+                    r"facturation", r"sold\s+to")
 NICHT_KAEUFER = _re(r"liefer", r"leistungsort", r"delivery", r"ship\s+to", r"livraison", r"verkäufer", r"seller",
-                    r"lieferant", r"absender", r"zahlungsempf", r"supplier", r"vendor", r"versand")
+                    r"absender", r"zahlungsempf", r"supplier", r"vendor", r"versand", r"warenempfänger")
+LABELWORT = set("rechnungsempfänger rechnungsadresse käufer leistungsempfänger bill to invoice buyer kunde customer "
+                "empfänger client lieferanschrift lieferadresse leistungsort delivery address ship adresse de livraison "
+                "verkäufer seller lieferant absender supplier vendor versand anschrift und abweichender warenempfänger "
+                "an facturation sold from".split())
+
+
+def _label(c: str) -> bool:
+    """Beschriftungszelle: endet auf „:“ oder besteht nur aus Anschriften-Beschriftungen („Lieferanschrift / Leistungsort“)."""
+    w = re.findall(r"[^\W\d_]+", c.lower())
+    return c.rstrip().endswith(":") or bool(w) and all(x in LABELWORT for x in w)
 STOP = _re(r"\brechnung", r"\binvoice\b", r"\bdatum\b", r"\bdate\b", r"\btel\b", r"\bfax\b", r"@", r"·", r"\|",
            r"\bseite\b", r"\bnr\b", r"\bnummer\b", r"www\.", r"\biban\b", r"\bust\b", r"\bsteuer-?(?:nummer|nr)")
 
@@ -412,58 +424,89 @@ def _zellen(z: str) -> list[tuple[int, str]]:
     return [(m.start(), m.group()) for m in re.finditer(r"\S+(?: \S+)*", z)]
 
 
+ANSCHRIFT_FELD = re.compile(r"(?i)name|firma|anschrift|adresse|address|stra(?:ß|ss)e|company|empfänger|käufer|kunde")
+VERKAEUFER_LABEL = _re(r"verkäufer", r"seller", r"lieferant", r"absender", r"supplier", r"vendor")
+
+
+def _block(zeilen: list[str], i: int, a: int, zelle: str) -> tuple[list[str], int, bool, int]:
+    """Anschriftenblock über der PLZ-Zelle (Spalte a): (Zeilen von oben, Zeile über dem Block, Fußzeile?, Spalte der
+    Beschriftungen – bei „Name: …“ die Spalte der Schlüssel, sonst a)."""
+    block, j, leer, fuss, ref = [zelle], i - 1, 0, False, a
+    while j >= 0 and i - j <= 10 and len(block) < 4:
+        zellen = _zellen(zeilen[j])
+        if not zellen:
+            leer += 1
+            if leer >= 2:      # zwei Leerzeilen (Layout-Text): Block zu Ende
+                break
+            j -= 1
+            continue
+        leer = 0
+        treffer = [c for s, c in zellen if abs(s - a) <= 2]
+        if not treffer:
+            if any(s < a + len(zelle) and s + len(c) > a - 2 for s, c in zellen):   # ragt in die Spalte: Ende
+                break
+            j -= 1                                    # nur andere Spalte (Datenkasten): überspringen
+            continue
+        c = treffer[0]
+        links = [x for s, x in zellen if s < a - 2]
+        if links and links[-1].rstrip().endswith(":") and not ANSCHRIFT_FELD.search(links[-1]):
+            break                                     # „Nummer:   GE2020211“ (Feld in Schlüssel-Wert-Form)
+        if links and links[-1].rstrip().endswith(":"):
+            ref = min(ref, next(s for s, x in zellen if x is links[-1]))
+        fuss = fuss or bool(FUSS.search(zeilen[j]) and not STOP.search(c))
+        c = re.sub(r"\s+[^\W\d][\w.\-]*:\s*\S+\s*$", "", c)   # „Firma GmbH Datum: 02.11.2026“ (Text ohne Layout)
+        if (m := re.match(r"([^:]{1,40}):\s*(.*)", c)) and not _label(c):
+            if not ANSCHRIFT_FELD.search(m.group(1)) or re.search(r"\d", m.group(1)):
+                if re.fullmatch(r"\S+", m.group(2)):
+                    j -= 1                            # „Kundennr.: 10004“ zwischen den Anschriftzeilen
+                    continue
+                break
+            c = m.group(2)                            # „Name: Kunden AG Mitte“
+        if not c.strip() or _label(c) or ABSENDER.search(c) or (
+                STOP.search(c) and not re.match(r"(?i)(herrn?|frau|z\.\s?h|attn|c/o)\b", c)):
+            break
+        block.insert(0, c)
+        j -= 1
+    return block, j, fuss, ref
+
+
 def _kaeufer(zeilen: list[str]) -> tuple[Partei | None, str]:
-    """Anschriftenblock mit PLZ-Zeile, der weder Verkäufer (Briefkopf, Fußzeile) noch Lieferanschrift ist.
+    """Anschriftenblock mit PLZ-Zeile, der weder Verkäufer (Briefkopf, Fußzeile, „Verkäufer:“) noch Lieferanschrift ist.
     `zeilen` mit Leerzeilen: zwei Leerzeilen (Layout-Text) trennen Blöcke."""
-    kopf = next((" ".join(z.split()) for z in zeilen if z.strip()), "")
-    fuss = " ".join(z for z in zeilen if FUSS.search(z) or "·" in z or "|" in z).casefold()
-    kandidaten = []
+    kopf = next((" ".join(z.split()) for z in zeilen if z.strip()), "").casefold()
+    fusszeilen = " ".join(z for z in zeilen if FUSS.search(z) or ABSENDER.search(z) or "·" in z or "|" in z).casefold()
+    bloecke, verkaeufer = [], set()
     for i, z in enumerate(zeilen):
         for a, zelle in _zellen(z):
             if not (m := PLZ_RE.match(zelle)) or re.search(r"\d{3,}", m.group(2)):
                 continue
-            block, j, leer, ok = [zelle], i - 1, 0, True
-            while j >= 0 and i - j <= 10 and len(block) < 4:
-                zellen = _zellen(zeilen[j])
-                if not zellen:
-                    leer += 1
-                    if leer >= 2:
-                        break
-                    j -= 1
-                    continue
-                leer = 0
-                treffer = [c for s, c in zellen if abs(s - a) <= 2]
-                if not treffer:
-                    if any(s < a + 20 for s, c in zellen):   # Zeile ragt in die Spalte: Block zu Ende
-                        break
-                    j -= 1                                    # nur rechte Spalte (Datenkasten): überspringen
-                    continue
-                c = treffer[0]
-                if FUSS.search(zeilen[j]) and not STOP.search(c):
-                    ok = False                                # Fußzeile mit Anschrift (Verkäufer)
-                c2 = re.sub(r"\s+[^\W\d][\w.\-]*:\s*\S+\s*$", "", c)   # „Firma GmbH Datum: 02.11.2026“
-                if not c2.strip() or re.fullmatch(r"[^\W\d][\w.\- ]{0,25}:\s*\S+", c):
-                    j -= 1                                    # reine Beschriftung: Wert (Text ohne Layout)
-                    continue
-                if KAEUFER_LABEL.search(c2) or NICHT_KAEUFER.search(c2) or re.search(r",.*\b\d{4,5}\b", c2) or (
-                        STOP.search(c2) and not re.match(r"(?i)(herrn?|frau|z\.\s?h|attn|c/o)\b", c2)):
-                    break
-                block.insert(0, c2)
-                j -= 1
-            if len(block) < 2 or not ok:
-                continue
-            ueber = " ".join(c for k in range(max(0, j - 3), j + 1) for s, c in _zellen(zeilen[k]) if abs(s - a) <= 2)
-            if NICHT_KAEUFER.search(ueber) and not KAEUFER_LABEL.search(ueber[-40:]):
+            block, j, fuss, ref = _block(zeilen, i, a, zelle)
+            if len(block) < 2:
                 continue
             if re.fullmatch(r"(?i)firma", block[0].strip()) and len(block) > 2:
                 block = block[1:]
             name = " ".join(block[0].split())
-            if re.match(r"(?i)(herrn?|frau)\b", name) or name.casefold() == kopf.casefold() or (
-                    len(name) > 5 and name.casefold() in fuss):
-                continue
-            kandidaten.append((0 if KAEUFER_LABEL.search(ueber) else 1, i, Partei(
-                name, " ".join(block[-2].split()) if len(block) > 2 else "", m.group(1), " ".join(m.group(2).split())),
-                block[0].strip()))
+            # nächste Beschriftung darüber in derselben Spalte (höchstens vier Zeilen)
+            label = ""
+            for k in range(j, max(-1, j - 4), -1):
+                kand = [c for s, c in _zellen(zeilen[k]) if abs(s - ref) <= 2 and (KAEUFER_LABEL.search(c) or
+                        NICHT_KAEUFER.search(c)) and (_label(c) or len(c) < 40)]
+                if kand:
+                    label = kand[-1]
+                    break
+            if VERKAEUFER_LABEL.search(label) or fuss:
+                verkaeufer.add(name.casefold())
+            bloecke.append((name, block, m, i, label))
+    kandidaten = []
+    for name, block, m, i, label in bloecke:
+        if NICHT_KAEUFER.search(label) and not KAEUFER_LABEL.search(label) or re.match(r"(?i)(herrn?|frau)\b", name):
+            continue
+        n = name.casefold()
+        if n in verkaeufer or n == kopf or (len(n) > 5 and (n in fusszeilen or n in kopf)):
+            continue
+        kandidaten.append((0 if label else 1, i, Partei(
+            name, " ".join(block[-2].split()) if len(block) > 2 else "", m.group(1), " ".join(m.group(2).split())),
+            block[0].strip()))
     if not kandidaten:
         return None, ""
     _, _, p, fund = min(kandidaten, key=lambda k: (k[0], k[1]))
