@@ -1,0 +1,40 @@
+# Rechnungen aus Lexware Office (Layout GM IT Solutions), Text ohne layout-Modus.
+name: lexware-gm-it
+schluesselwoerter: ["GM - IT Solutions - Marvin Gawenda", "Rechnungsnr.:", "Zwischensumme (netto)"]
+felder:
+  nummer: 'Rechnungsnr\.:\s*(\S+)'
+  datum: 'Datum:\s*(\d{2}\.\d{2}\.\d{4})'
+  leistungsdatum: '(?:Liefer|Leistungs)datum:\s*(\d{2}\.\d{2}\.\d{4})'
+  summe_netto: '^Zwischensumme \(netto\)\s+([\d.]+,\d{2})$'
+  summe_brutto: '^Gesamtbetrag\s+([\d.]+,\d{2})$'
+steuern: '^Umsatzsteuer (?P<satz>\d+(?:,\d+)?) %\s+(?P<betrag>[\d.]+,\d{2})$'
+# Name steht in der Zeile mit „Datum:“, danach optional Ansprechpartner und Liefer-/Leistungsdatum;
+# Straße ist die Zeile direkt vor PLZ/Ort.
+kaeufer: '^(?P<name>.+?) Datum: \d{2}\.\d{2}\.\d{4}\n(?:.*\n)*?(?P<strasse>.+)\n(?P<plz>\d{5}) (?P<ort>.+)$'
+positionen:
+  start: '^Pos\. Bezeichnung Menge Einheit'
+  ende: '^Zwischensumme \(netto\)'
+  zeile: '^(?P<nr>\d+) (?P<bezeichnung>.+?) (?P<menge>-?\d[\d.]*(?:,\d+)?) (?P<einheit>\S+) (?P<einzelpreis>-?[\d.]+,\d+) (?P<ust_satz>\d+,\d+) (?P<netto>-?[\d.]+,\d{2})$'
+  ust_satz: 19
+  # Seitenumbruch: Zwischensumme/Übertrag, Fußzeile, Seitenzahl, wiederholter Kopf
+  ignorieren:
+    - '^Zwischensumme\s'
+    - '^Übertrag\s'
+    - '^Seite \d+/\d+'
+    - '^Rechnung \S+$'
+    - 'USt-IdNr\.:'
+    - 'Steuernummer:'
+    - '^IBAN:'
+    - '^BIC:'
+    - '^\S+@\S+\.\S+$'
+    - '^www\.'
+einheiten:
+  Stück: H87
+  Stk.: H87
+  Stunde: HUR
+  Stunden: HUR
+  Std.: HUR
+  Pauschal: C62
+  pauschal: C62
+  Kilometer: KMT
+  km: KMT
