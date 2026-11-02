@@ -2,10 +2,14 @@
 import difflib
 import re
 import statistics
+from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import NamedTuple
 
 import pdfplumber
+
+from .modell import Partei, betrag
 
 FORMAT = 1
 PFLICHT_FELDER = ("nummer", "datum", "summe_netto", "summe_brutto", "kaeufer")
@@ -155,6 +159,8 @@ def _spur(rahmen, dx: float, dy: float) -> list[float]:
     """Rahmen um den Seitenversatz verschoben, auf 4 Stellen gerundet (für die Spur)."""
     return [round(rahmen[0] + dx, 4), round(rahmen[1] + dy, 4), round(rahmen[2] + dx, 4), round(rahmen[3] + dy, 4)]
 def feld_text(seiten, v, name, ocr=False, spur=None):
+    if not seiten:
+        raise BereichsFehler("PDF ohne Seiten")
     f = v["felder"].get(name)
     if not f:
         return None
@@ -175,3 +181,74 @@ def feld_text(seiten, v, name, ocr=False, spur=None):
     if spur is not None:
         spur[name] = {"seite": i, "rahmen": _spur(f["rahmen"], dx, dy)}
     return i, [" ".join(w.text for w in z) for z in zeilen(woerter_im_rahmen(seiten[i], f["rahmen"], dx, dy))]
+
+def _wert(seiten, v, name, ocr, spur, lesen):
+    t = feld_text(seiten, v, name, ocr, spur)
+    if t is None or not " ".join(t[1]).strip():
+        if name in PFLICHT_FELDER:
+            raise BereichsFehler(f"Feld {name} leer (Vorlage {v['name']})")
+        return None
+    try:
+        return lesen(" ".join(t[1]))
+    except ValueError as e:
+        raise BereichsFehler(f"Feld {name}: {e}") from None
+def _betrag(t: str) -> Decimal:
+    m = BETRAG.findall(t)
+    if not m:
+        raise ValueError(f"kein Betrag in {t!r}")
+    return abs(betrag(m[-1]))
+def _datum(t: str) -> date:
+    m = DATUM.search(t.replace("O", "0"))
+    if not m:
+        raise ValueError(f"kein Datum in {t!r}")
+    j = int(m[3]) + (2000 if len(m[3]) == 2 else 0)
+    return date(j, int(m[2]), int(m[1]))
+def _tage(t: str) -> int:
+    m = re.search(r"\d{1,3}", t)
+    if not m or not 1 <= int(m[0]) <= 365:
+        raise ValueError(f"keine Tageszahl in {t!r}")
+    return int(m[0])
+def _nummer(t: str) -> str:
+    n = "".join(t.split())
+    if not re.fullmatch(r"[A-Za-z0-9./_-]{1,30}", n):
+        raise ValueError(f"Rechnungsnummer {n!r} enthält unzulässige Zeichen")
+    return n
+def kopf_aus_bereichen(seiten, v, ocr=False, spur=None) -> dict:
+    w = lambda n, f: _wert(seiten, v, n, ocr, spur, f)
+    k = {"nummer": w("nummer", _nummer), "datum": w("datum", _datum), "leistungsdatum": w("leistungsdatum", _datum),
+         "summe_netto": w("summe_netto", _betrag), "summe_ust": w("summe_ust", _betrag),
+         "summe_brutto": w("summe_brutto", _betrag), "nachlass": w("nachlass", _betrag)}
+    kontrolle = w("nummer_kontrolle", _nummer)
+    if kontrolle is not None and (re.sub(r"O0?", "0", kontrolle) if ocr else kontrolle) != k["nummer"]:
+        raise BereichsFehler(f"Rechnungsnummer uneinheitlich gelesen: {k['nummer']} / {kontrolle}")
+    k["faellig"] = w("faellig", _datum)
+    tage = w("zahlungsziel_tage", _tage)
+    if k["faellig"] is None and tage:
+        k["faellig"] = k["datum"] + timedelta(days=tage)
+    _, z = feld_text(seiten, v, "kaeufer", ocr, spur)
+    plz = [i for i, s in enumerate(z) if re.match(r"\d{5} ", s)]
+    if not plz or plz[-1] < 2:
+        raise BereichsFehler(f"Käuferblock ohne Name, Straße, PLZ/Ort (Vorlage {v['name']})")
+    p = plz[-1]
+    k["kaeufer"] = Partei(z[0].strip(), z[p - 1].strip(), z[p][:5], z[p][6:].strip())
+    k["steuern"] = _steuern(seiten, v, ocr, spur)
+    return k
+def _steuern(seiten, v, ocr, spur) -> dict[Decimal, Decimal]:
+    s = v.get("steuern")
+    if not s:
+        return {}
+    if not seiten:
+        raise BereichsFehler("PDF ohne Seiten")
+    i = 0 if s["seite"] == "erste" else len(seiten) - 1
+    ax, ay = s["anker"]["rahmen"][:2]
+    ergebnis = {}
+    for n, (x, y, _, satz) in enumerate(treffer(seiten[i], s["anker"]["text"], ocr)):
+        dx, dy = x - ax, y - ay
+        text = " ".join(w.text for w in woerter_im_rahmen(seiten[i], s["rahmen"], dx, dy))
+        try:
+            ergebnis[Decimal(satz) if satz else Decimal(str(s["satz"]))] = _betrag(text)
+        except ValueError as e:
+            raise BereichsFehler(f"Steuerzeile: {e}") from None
+        if spur is not None:
+            spur[f"steuern{n + 1}"] = {"seite": i, "rahmen": _spur(s["rahmen"], dx, dy)}
+    return ergebnis
