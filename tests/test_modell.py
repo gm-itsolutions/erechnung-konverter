@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal as D
 import pytest
-from erechnung.modell import Partei, Position, Rechnung, SummenFehler, betrag, datum, runde, summenabgleich
+from erechnung.modell import Nachlass, Partei, Position, Rechnung, SummenFehler, betrag, datum, runde, summenabgleich
 def pos(nr, menge, preis, netto, satz="19"):
     return Position(str(nr), f"Leistung {nr}", D(menge), "HUR", D(preis), D(netto), D(satz))
 def rechnung(positionen, netto, ust, brutto, steuern=None):
@@ -48,3 +48,23 @@ def test_abgleich_gedruckte_steuer_mit_cent_toleranz():
 def test_abgleich_fehler(positionen, netto, ust, brutto, steuern, teil):
     with pytest.raises(SummenFehler, match=teil):
         summenabgleich(rechnung(positionen, netto, ust, brutto, steuern))
+def test_abgleich_rabatt_ein_satz():
+    """Wie Lexware RE0158 (Zahlen erfunden-gleichwertig): Steuer auf die Basis nach Nachlass."""
+    r = rechnung([pos(1, "3", "207.00", "621.00")], "550.00", "104.50", "654.50", {D("19"): D("104.50")})
+    r.nachlaesse = [Nachlass(D("71.00"), "Rabatt")]
+    assert summenabgleich(r) == {D("19"): (D("550.00"), D("104.50"))}
+def test_abgleich_rabatt_und_zuschlag_mit_satz():
+    r = rechnung([pos(1, "1", "100.00", "100.00"), pos(2, "1", "50.00", "50.00", "7")], "145.00", "20.95", "165.95")
+    r.nachlaesse = [Nachlass(D("10.00"), "Rabatt", D("19")), Nachlass(D("5.00"), "Versand", D("7"), zuschlag=True)]
+    assert summenabgleich(r) == {D("19"): (D("90.00"), D("17.10")), D("7"): (D("55.00"), D("3.85"))}
+@pytest.mark.parametrize("nachlass,netto,teil", [
+    (Nachlass(D("10.00"), "Rabatt"), "140.00", "ohne Steuersatz bei mehreren"),
+    (Nachlass(D("10.00"), "Rabatt", D("16")), "140.00", "16 %"),
+    (Nachlass(D("10.00"), "Rabatt", D("19")), "150.00", "Nachlässe"),
+    (Nachlass(D("-10.00"), "Rabatt", D("19")), "160.00", "größer 0"),
+])
+def test_abgleich_rabatt_fehler(nachlass, netto, teil):
+    r = rechnung([pos(1, "1", "100.00", "100.00"), pos(2, "1", "50.00", "50.00", "7")], netto, None, "999.00")
+    r.nachlaesse = [nachlass]
+    with pytest.raises(SummenFehler, match=teil):
+        summenabgleich(r)

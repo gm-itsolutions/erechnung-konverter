@@ -47,13 +47,20 @@ class Position:
     netto: Decimal
     ust_satz: Decimal
 @dataclass
+class Nachlass:
+    """Nachlass (oder Zuschlag) auf Rechnungsebene, Betrag netto und positiv. Ohne Satz: nur bei einem Steuersatz."""
+    betrag: Decimal
+    grund: str = ""
+    ust_satz: Decimal | None = None
+    zuschlag: bool = False
+@dataclass
 class Rechnung:
     nummer: str
     datum: date
     verkaeufer: Partei
     kaeufer: Partei
     positionen: list[Position]
-    summe_netto: Decimal
+    summe_netto: Decimal  # Netto nach Nachlässen/Zuschlägen (Steuerbasis)
     summe_brutto: Decimal
     summe_ust: Decimal | None = None
     steuern: dict[Decimal, Decimal] = field(default_factory=dict)  # Satz -> gedruckter Steuerbetrag
@@ -62,6 +69,7 @@ class Rechnung:
     waehrung: str = "EUR"
     vorlage: str = ""
     ocr_text: str = ""    # gesetzt, wenn per Texterkennung gelesen
+    nachlaesse: list[Nachlass] = field(default_factory=list)
 class SummenFehler(ValueError):
     pass
 def summenabgleich(r: Rechnung) -> dict[Decimal, tuple[Decimal, Decimal]]:
@@ -76,8 +84,23 @@ def summenabgleich(r: Rechnung) -> dict[Decimal, tuple[Decimal, Decimal]]:
             raise SummenFehler(f"Position {p.nr}: Menge × Einzelpreis = {de(runde(p.menge * p.einzelpreis))} ≠ {de(p.netto)}")
         basis[p.ust_satz] = basis.get(p.ust_satz, Decimal(0)) + p.netto
     summe = sum(basis.values(), Decimal(0))
-    if summe != r.summe_netto:
-        raise SummenFehler(f"Netto: Positionen {de(summe)} ≠ Rechnung {de(r.summe_netto)}")
+    for n in r.nachlaesse:
+        art = "Zuschlag" if n.zuschlag else "Nachlass"
+        if n.betrag <= 0:
+            raise SummenFehler(f"{art} {n.grund}: Betrag {de(n.betrag)} muss größer 0 sein")
+        satz = n.ust_satz
+        if satz is None:
+            # Lexware druckt beim Rabatt keinen Satz; eine Aufteilung auf mehrere Sätze ist nicht belegt → nicht raten
+            if len(basis) > 1:
+                raise SummenFehler(f"{art} {n.grund} ohne Steuersatz bei mehreren Steuersätzen: Aufteilung unklar")
+            satz = next(iter(basis))
+        if satz not in basis:
+            raise SummenFehler(f"{art} {n.grund}: Steuersatz {satz} % kommt in keiner Position vor")
+        basis[satz] += n.betrag if n.zuschlag else -n.betrag
+    netto = sum(basis.values(), Decimal(0))
+    if netto != r.summe_netto:
+        nl = f" − Nachlässe/Zuschläge {de(summe - netto)}" if r.nachlaesse else ""
+        raise SummenFehler(f"Netto: Positionen {de(summe)}{nl} ≠ Rechnung {de(r.summe_netto)}")
     ergebnis = {}
     for satz, b in basis.items():
         steuer = runde(b * satz / 100)

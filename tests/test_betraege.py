@@ -22,7 +22,7 @@ UBL = b"""<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2
  <cac:InvoiceLine><cbc:LineExtensionAmount currencyID="EUR">100.00</cbc:LineExtensionAmount></cac:InvoiceLine>
 </Invoice>"""
 
-ERWARTET = {"nummer": "RE0001", "netto": D("100.00"), "steuer": D("19.00"), "brutto": D("119.00"), "positionen": [D("100.00")]}
+ERWARTET = {"nummer": "RE0001", "netto": D("100.00"), "steuer": D("19.00"), "brutto": D("119.00"), "nachlass": D("0"), "positionen": [D("100.00")]}
 
 def test_cii():
     assert betraege(CII) == ERWARTET

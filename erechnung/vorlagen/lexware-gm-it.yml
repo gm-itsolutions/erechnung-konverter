@@ -16,9 +16,15 @@ felder:
   leistungsdatum: '(?:Liefer|Leistungs)datum:\s*([\dO]{2}\.[\dO]{2}\.[\dO]{4})'
   # Lexware: Fälligkeit = Rechnungsdatum + N Tage (so steht es auch im DueDate der Lexware-XML)
   zahlungsziel_tage: '^Zahlungsziel (\d+) Tage'
-  summe_netto: '^Zwischensumme ?\(netto\)\s*(\d[\d. ]*[,.] ?\d{2})(?: ?(?:€|EUR))?$'
+  # Mit Rabatt: „Zwischensumme (netto)“, „abzgl. Rabatt -71,00“, „Gesamt (netto)“ → Netto ist „Gesamt (netto)“
+  summe_netto:
+    - '^Gesamt ?\(netto\)\s*(\d[\d. ]*[,.] ?\d{2})(?: ?(?:€|EUR))?$'
+    - '^Zwischensumme ?\(netto\)\s*(\d[\d. ]*[,.] ?\d{2})(?: ?(?:€|EUR))?$'
   summe_brutto: '^Gesamtbetrag\s+(\d[\d. ]*[,.] ?\d{2})(?: ?(?:€|EUR))?$'
 steuern: '^Umsatzsteuer (?P<satz>\d+(?:[,.]\d+)?) ?%\s*(?P<betrag>\d[\d. ]*[,.] ?\d{2})(?: ?(?:€|EUR))?$'
+# Rabatt auf Rechnungsebene (RE0158): ohne Steuersatz gedruckt → nur bei einem Satz eindeutig (Summenabgleich).
+# Prozent-Rabatte („Rabatt 10 %“) sind bei Lexware nicht belegt und werden nicht erkannt (→ Summenabgleich schlägt fehl).
+nachlaesse: '^abzgl\. (?P<grund>.+?)\s+[-–—]? ?(?P<betrag>\d[\d. ]*[,.] ?\d{2})(?: ?(?:€|EUR))?$'
 # Name steht in der Zeile mit „Datum:“, danach optional Ansprechpartner und Liefer-/Leistungsdatum;
 # Straße ist die Zeile direkt vor PLZ/Ort.
 kaeufer: '^(?P<name>.+?) Datum: \S+\n(?:.*\n)*?(?P<strasse>.+)\n(?P<plz>\d{5}) (?P<ort>.+)$'

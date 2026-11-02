@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 import pdfplumber
 import yaml
-from .modell import Partei, Position, Rechnung, betrag, datum
+from .modell import Nachlass, Partei, Position, Rechnung, betrag, datum
 STANDARD = Path(__file__).parent / "vorlagen"
 PFLICHT = ("nummer", "datum", "summe_netto", "summe_brutto")
 MIN_ZEICHEN = 20          # weniger Buchstaben/Ziffern im PDF → Bild → Texterkennung
@@ -21,7 +21,8 @@ def _pruefe(v: dict, datei: Path) -> dict:
         assert v.get("name") and v.get("schluesselwoerter"), "name/schluesselwoerter fehlen"
         assert all(f in v.get("felder", {}) for f in PFLICHT), f"felder brauchen {', '.join(PFLICHT)}"
         assert all(k in v.get("positionen", {}) for k in ("start", "ende", "zeile")), "positionen: start/ende/zeile"
-        muster = [*v["felder"].values(), v.get("steuern"), v.get("kaeufer"),
+        felder = [m for f in v["felder"].values() for m in (f if isinstance(f, list) else [f])]
+        muster = [*felder, v.get("steuern"), v.get("kaeufer"), v.get("nachlaesse"),
                   *(v["positionen"][k] for k in ("start", "ende", "zeile")), *v["positionen"].get("ignorieren", [])]
         for m in muster:
             if m:
@@ -45,8 +46,9 @@ def finde_vorlage(text: str, vorlagen: list[dict]) -> dict:
         raise VorlagenFehler("mehrere Vorlagen: " + ", ".join(v["name"] for v in passend))
     return passend[0]
 def _feld(text: str, v: dict, name: str) -> str | None:
-    muster = v["felder"].get(name)
-    m = re.search(muster, text, re.MULTILINE) if muster else None
+    """Ein Muster oder eine Liste (das erste, das passt, gilt)."""
+    muster = v["felder"].get(name) or []
+    m = next(filter(None, (re.search(mu, text, re.MULTILINE) for mu in (muster if isinstance(muster, list) else [muster]))), None)
     if not m and name in PFLICHT:
         raise VorlagenFehler(f"Feld {name} nicht gefunden (Vorlage {v['name']})")
     return m.group(1).strip() if m else None
@@ -96,6 +98,10 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
             raise VorlagenFehler(f"Käufer nicht gefunden (Vorlage {v['name']})")
         kaeufer = Partei(**{k: w.strip() for k, w in m.groupdict().items() if w})
     steuern = {_satz(m["satz"]): betrag(m["betrag"]) for m in re.finditer(v["steuern"], text, re.MULTILINE)} if v.get("steuern") else {}
+    # Nachlässe auf Rechnungsebene: Gruppen betrag (Vorzeichen egal), optional grund und satz
+    nachlaesse = [Nachlass(abs(betrag(m["betrag"])), (m.groupdict().get("grund") or "").strip(),
+                           _satz(m["satz"]) if m.groupdict().get("satz") else None)
+                  for m in re.finditer(v["nachlaesse"], text, re.MULTILINE)] if v.get("nachlaesse") else []
     opt = lambda n: _feld(text, v, n)
     if "nummer_kontrolle" in v["felder"] and _ocr_nummer(opt("nummer_kontrolle")) != opt("nummer"):
         raise VorlagenFehler(f"Rechnungsnummer uneinheitlich gelesen: {opt('nummer')} / {opt('nummer_kontrolle')}")
@@ -107,7 +113,7 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         positionen=_positionen(text, v), summe_netto=betrag(opt("summe_netto")), summe_brutto=betrag(opt("summe_brutto")),
         summe_ust=betrag(opt("summe_ust")) if opt("summe_ust") else None, steuern=steuern,
         leistungsdatum=datum(opt("leistungsdatum")) if opt("leistungsdatum") else None,
-        faellig=faellig, vorlage=v["name"])
+        faellig=faellig, vorlage=v["name"], nachlaesse=nachlaesse)
 def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
                   ocr: Callable[[Path], str] | None = None) -> Rechnung:
     """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden) und dieselbe Vorlagenlogik."""

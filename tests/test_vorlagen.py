@@ -156,3 +156,25 @@ def test_lexware_nummer_ocr_gegenprobe(gelesen):
     text = text.replace("Rechnungsnr.: RE0146", f"Pritzwalk OT Beispielort Musterstraße Rechnungsnr.: {gelesen}")
     r = rechnung_aus_text(text, finde_vorlage(text, lade_vorlagen(STANDARD)), VERKAEUFER)
     assert r.nummer == "RE0146"
+
+
+def _lexware_rabatt(ocr=False):
+    """Lexware-Rabatt wie RE0158: Zwischensumme (netto), abzgl. Rabatt, Gesamt (netto) (erfundene Beträge)."""
+    text = _ocr_lexware() if ocr else (Path(__file__).parent / "daten" / "lexware-synthetisch.txt").read_text(encoding="utf-8")
+    alt = ("Zwischensumme(netto) 200,00 EUR\nUmsatzsteuer 19% 38.00\nGesamtbetrag 2 38,00 €" if ocr else
+           "Zwischensumme (netto) 200,00\nUmsatzsteuer 19 % 38,00\nGesamtbetrag 238,00")
+    neu = ("Zwischensumme(netto) 200,00 EUR\nabzgl. Rabatt — 20.00 €\nGesamt(netto) 1 80,00 EUR\nUmsatzsteuer 19% 34.20\nGesamtbetrag 214,20 €" if ocr else
+           "Zwischensumme (netto) 200,00\nabzgl. Rabatt -20,00\nGesamt (netto) 180,00\nUmsatzsteuer 19 % 34,20\nGesamtbetrag 214,20")
+    assert alt in text
+    return text.replace(alt, neu)
+
+
+@pytest.mark.parametrize("ocr", [False, True])
+def test_lexware_rabatt(ocr):
+    from erechnung.vorlagen import STANDARD
+    text = _lexware_rabatt(ocr)
+    r = rechnung_aus_text(text, finde_vorlage(text, lade_vorlagen(STANDARD)), VERKAEUFER)
+    assert r.summe_netto == D("180.00")
+    assert [(n.betrag, n.grund, n.ust_satz, n.zuschlag) for n in r.nachlaesse] == [(D("20.00"), "Rabatt", None, False)]
+    assert summenabgleich(r) == {D("19"): (D("180.00"), D("34.20"))}
+    assert [p.netto for p in r.positionen] == [D("190.00"), D("10.00")]

@@ -21,7 +21,7 @@ Getestet wird mit Marvins Lexware-Rechnungen. Das Layout von Prignitz Markt folg
 
 | Enthalten | Nicht enthalten (offen, Abschnitt 11) |
 |---|---|
-| Rechnung (Typ 380), EUR, Umsatzsteuer Kategorie S (z. B. 19 % und 7 %, auch gemischt) | Gutschrift, Storno, Abschlag, Rabatt-/Zuschlagszeilen, steuerfrei/Reverse Charge (§ 13b), Kleinunternehmer |
+| Rechnung (Typ 380), EUR, Umsatzsteuer Kategorie S (z. B. 19 % und 7 %, auch gemischt), Rabatt auf Rechnungsebene (Betrag) | Gutschrift, Storno, Abschlag, Prozent-Rabatt, Rabatt/Zuschlag je Position, steuerfrei/Reverse Charge (§ 13b), Kleinunternehmer |
 | ZUGFeRD-PDF (EN16931) + XML, XSD-Prüfung | PDF/A-3 (Ghostscript), XRechnung-Syntax mit Leitweg-ID |
 | Vorlage je Layout (YAML) | Empfang/Prüfung eingehender E-Rechnungen |
 | Installation und Update über gm-update | Versand per Mail, Monitoring-Anbindung |
@@ -81,7 +81,7 @@ Halb kopierte Dateien: Der Explorer schreibt die Zieldatei unter ihrem endgülti
 | `erechnung/modell.py` | Datenklassen `Partei`, `Position`, `Rechnung`; `betrag()`, `datum()`; `summenabgleich()` |
 | `erechnung/vorlagen.py` | `pdf_text()`, `lade_vorlagen()`, `finde_vorlage()`, `lies_rechnung(…, ocr=None)` |
 | `erechnung/ocr.py` | `tesseract()` (Aufruf finden), `erkenne(pdf, arbeit, aufruf)`, `bereinige()` |
-| `erechnung/cii.py` | `erzeuge_cii()` (CII-XML, EN16931) |
+| `erechnung/cii.py` | `erzeuge_cii()` (CII-XML, EN16931); Nachlass/Zuschlag als Kopf-`SpecifiedTradeAllowanceCharge` mit Steuersatz, `LineTotalAmount` = Σ Positionen, `Charge-`/`AllowanceTotalAmount`, `TaxBasisTotalAmount` = Netto (wie Lexware RE0158) |
 | `erechnung/ueberwachen.py` | `Konfig`, `lade_konfig()`, `verarbeite()`, `schritt()`, `ueberwache()` |
 | `erechnung/vorlagen/*.yml` | eine Vorlage je Layout |
 | `release/bauen.sh`, `release/requirements-windows.txt` | Windows-ZIP auf Linux bauen |
@@ -120,10 +120,11 @@ felder:                                                 # je eine Gruppe; Pflich
   leistungsdatum: 'Leistungsdatum\s+(\d{2}\.\d{2}\.\d{4})'     # optional
   faellig: 'zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})'              # optional
   zahlungsziel_tage: '^Zahlungsziel (\d+) Tage'                # optional, ohne faellig: datum + N Tage
-  summe_netto: 'Gesamtbetrag netto\s+([\d.,]+)'
+  summe_netto: 'Gesamtbetrag netto\s+([\d.,]+)'             # auch Liste: das erste Muster, das passt
   summe_ust: 'Umsatzsteuer \d+ %\s+([\d.,]+)'                  # optional, sonst aus steuern
   summe_brutto: 'Gesamtbetrag brutto\s+([\d.,]+)'
 steuern: 'Umsatzsteuer (?P<satz>\d+) %\s+(?P<betrag>[\d.,]+)' # optional, alle Treffer
+nachlaesse: '^abzgl\. (?P<grund>.+?)\s+-?(?P<betrag>[\d.,]+)$'   # optional, alle Treffer; satz optional
 kaeufer: '(?s)^(?P<name>.+?)\n(?P<strasse>.+?)\n(?P<plz>\d{5}) (?P<ort>.+?)\n'
 positionen:
   start: 'Pos\.\s+Beschreibung'
@@ -133,6 +134,8 @@ positionen:
   ignorieren: ['^Seite \d+']       # Zeilen, die nie Fortsetzung sind
 einheiten: {Stunde: HUR, Std.: HUR, Stück: H87, Pauschal: C62}   # sonst C62
 ```
+
+`nachlaesse`: Nachlässe auf Rechnungsebene (Betrag ohne Vorzeichen, Gruppe `grund`, optional `satz`). Lexware druckt „Zwischensumme (netto)“, „abzgl. Rabatt -71,00“, „Gesamt (netto)“ ohne Steuersatz; Netto ist dann „Gesamt (netto)“ (Liste in `summe_netto`). Prozent-Rabatte und Zuschläge erkennt die Lexware-Vorlage nicht (nicht belegt). Das Modell kennt auch Zuschläge (`Nachlass(zuschlag=True)`).
 
 Optional `felder.nummer_kontrolle`: zweite Fundstelle der Nummer; ist der Schlüssel gesetzt, muss sie gefunden werden und gleich sein (sonst „Rechnungsnummer uneinheitlich gelesen“). Schlüsselwörter werden ohne Leerzeichen verglichen. `betrag()` liest `€`/`EUR`, Leerzeichen und einen Punkt vor genau zwei Endziffern als Dezimalzeichen (`1.557.21`), `datum()` ersetzt `O` durch `0`. Die Vorlage `lexware-gm-it.yml` ist auf Texterkennung abgestimmt (Abschnitt 3.2).
 
@@ -170,8 +173,8 @@ In `modell.summenabgleich(r)`, alle Beträge `Decimal`, Rundung kaufmännisch (`
 
 1. Mindestens eine Position.
 2. Je Position: `|runde(menge × einzelpreis) − netto| ≤ 0,01`.
-3. `Σ netto der Positionen == summe_netto` (exakt).
-4. Je Steuersatz: `basis = Σ netto`, `steuer = runde(basis × satz / 100)`. Steht der Satz auf der Rechnung (`steuern`), muss `|gedruckt − berechnet| ≤ 0,01` sein (Toleranz wie EN16931 BR-CO-17), in die XML geht der gedruckte Wert.
+3. `Σ netto der Positionen − Σ Nachlässe + Σ Zuschläge == summe_netto` (exakt). Ein Nachlass ohne Steuersatz gilt nur bei genau einem Satz; bei mehreren → Fehler „ohne Steuersatz bei mehreren Steuersätzen: Aufteilung unklar“ (wie Lexware dann aufteilt, ist nicht belegt). Ein Satz, den keine Position hat → Fehler.
+4. Je Steuersatz: `basis = Σ netto − Nachlässe + Zuschläge dieses Satzes`, `steuer = runde(basis × satz / 100)`. Steht der Satz auf der Rechnung (`steuern`), muss `|gedruckt − berechnet| ≤ 0,01` sein (Toleranz wie EN16931 BR-CO-17), in die XML geht der gedruckte Wert.
 5. `Σ steuer == summe_ust` (wenn gedruckt) und `summe_netto + Σ steuer == summe_brutto` (exakt).
 6. Steuersatz 0 % → Fehler „im ersten Wurf nicht unterstützt“.
 
@@ -229,7 +232,7 @@ Berührte Praktiken: KONF, BER, DET, NOT, ASST, DEV, TEST. Grundlagen-Block `<P>
 
 1. PDF/A-3 mit Ghostscript (A2).
 2. Prignitz-Markt-Vorlage nach dem Termin 03.11.2026 (Muster-PDFs, Rechnungsprogramm, Windows-Version).
-3. Weitere Fälle: Gutschrift (381), Rabatte, steuerfrei/Reverse Charge, Kleinunternehmer.
+3. Weitere Fälle: Gutschrift (381), Prozent-Rabatt, Rabatt bei gemischten Steuersätzen (Lexware-Aufteilung prüfen), Rabatt je Position, steuerfrei/Reverse Charge, Kleinunternehmer.
 4. Monitoring (A3), Konto `LOCAL SERVICE` (A1).
 5. XRechnung (UBL/CII mit Leitweg-ID) für öffentliche Auftraggeber.
 6. Empfang eingehender E-Rechnungen (Projektziel Teil 2).

@@ -19,9 +19,11 @@ def betraege(xml: bytes) -> dict:
                 "netto": Decimal(x(f"string({s}ram:TaxBasisTotalAmount)")),
                 "steuer": Decimal(x(f"string({s}ram:TaxTotalAmount[1])")),
                 "brutto": Decimal(x(f"string({s}ram:GrandTotalAmount)")),
+                "nachlass": Decimal(x(f"string({s}ram:AllowanceTotalAmount)") or 0),
                 "positionen": [Decimal(t) for t in x("//ram:IncludedSupplyChainTradeLineItem//ram:LineTotalAmount/text()")]}
     return {"nummer": x("string(cbc:ID)"),
             "netto": Decimal(x("string(cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount)")),
             "steuer": Decimal(x("string(cac:TaxTotal[1]/cbc:TaxAmount)")),
             "brutto": Decimal(x("string(cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount)")),
+            "nachlass": Decimal(x("string(cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount)") or 0),
             "positionen": [Decimal(t) for t in x("cac:InvoiceLine/cbc:LineExtensionAmount/text()")]}

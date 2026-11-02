@@ -91,6 +91,16 @@ def erzeuge_cii(r: Rechnung, steuern: dict[Decimal, tuple[Decimal, Decimal]]) ->
         _e(st, "ram:BasisAmount", _betrag(basis))
         _e(st, "ram:CategoryCode", "S")
         _e(st, "ram:RateApplicablePercent", _zahl(satz))
+    for n in r.nachlaesse:                                   # BG-20/BG-21, Reihenfolge laut XSD wie Lexware
+        ac = _e(abr, "ram:SpecifiedTradeAllowanceCharge")
+        _e(_e(ac, "ram:ChargeIndicator"), "udt:Indicator", "true" if n.zuschlag else "false")
+        _e(ac, "ram:ActualAmount", _betrag(n.betrag))
+        _e(ac, "ram:Reason", n.grund or ("Zuschlag" if n.zuschlag else "Nachlass"))   # BR-33/BR-38
+        st = _e(ac, "ram:CategoryTradeTax")
+        _e(st, "ram:TypeCode", "VAT")
+        _e(st, "ram:CategoryCode", "S")
+        # ohne Satz nur bei genau einem Steuersatz (summenabgleich prüft das)
+        _e(st, "ram:RateApplicablePercent", _zahl(n.ust_satz if n.ust_satz is not None else next(iter(steuern))))
     bed = _e(abr, "ram:SpecifiedTradePaymentTerms")
     if r.faellig:
         _datum(bed, "ram:DueDateDateTime", r.faellig)
@@ -98,7 +108,10 @@ def erzeuge_cii(r: Rechnung, steuern: dict[Decimal, tuple[Decimal, Decimal]]) ->
         _e(bed, "ram:Description", "Zahlungsbedingungen siehe Rechnung")
     ust = sum((s for _, s in steuern.values()), Decimal(0))
     summen = _e(abr, "ram:SpecifiedTradeSettlementHeaderMonetarySummation")
-    _e(summen, "ram:LineTotalAmount", _betrag(r.summe_netto))
+    _e(summen, "ram:LineTotalAmount", _betrag(sum((p.netto for p in r.positionen), Decimal(0))))
+    if r.nachlaesse:
+        for zuschlag, tag in ((True, "ram:ChargeTotalAmount"), (False, "ram:AllowanceTotalAmount")):
+            _e(summen, tag, _betrag(sum((n.betrag for n in r.nachlaesse if n.zuschlag == zuschlag), Decimal(0))))
     _e(summen, "ram:TaxBasisTotalAmount", _betrag(r.summe_netto))
     _e(summen, "ram:TaxTotalAmount", _betrag(ust), currencyID=r.waehrung)
     _e(summen, "ram:GrandTotalAmount", _betrag(r.summe_brutto))
