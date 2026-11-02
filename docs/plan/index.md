@@ -6,7 +6,7 @@
 
 **Architecture:** Python-Paket `erechnung` (pdfplumber → YAML-Regex-Vorlage → `Decimal`-Modell mit Pflicht-Summenabgleich → CII-XML mit lxml → factur-x). Läuft als geplante Aufgabe (SYSTEM) mit Windows-Embeddable-Python 3.14; das ZIP baut die Forgejo-CI auf Linux, gm-update verteilt es signiert.
 
-**Tech Stack:** Python 3.14, pdfplumber, lxml, factur-x 7.9, pyyaml, pytest (+ reportlab nur für Tests), PowerShell 5.1, gm-update 0.1.3, Mustang-CLI (nur gm-claude).
+**Tech Stack:** Python 3.14, pdfplumber, lxml, factur-x 7.9, pyyaml, pytest (+ reportlab nur für Tests), PowerShell 5.1, gm-update 0.1.4, Mustang-CLI (nur gm-claude).
 
 **Spec:** `docs/spezifikation.md`
 
