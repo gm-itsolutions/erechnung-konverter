@@ -1,5 +1,12 @@
 """Angelernte Vorlagen: Felder per Rahmen und Anker, keine Regex (docs/lernmodus/spezifikation.md 5, 6)."""
+import difflib
 import re
+import statistics
+from pathlib import Path
+from typing import NamedTuple
+
+import pdfplumber
+
 FORMAT = 1
 PFLICHT_FELDER = ("nummer", "datum", "summe_netto", "summe_brutto", "kaeufer")
 FELDER = (*PFLICHT_FELDER, "nummer_kontrolle", "leistungsdatum", "faellig", "zahlungsziel_tage", "summe_ust", "nachlass")
@@ -84,3 +91,87 @@ def pruefe_bereichsvorlage(v: dict) -> dict:
     _ja(isinstance(e, dict) and len(e) <= 50 and all(isinstance(k, str) and 1 <= len(k) <= 20 and isinstance(w, str)
         and re.fullmatch(r"[A-Z0-9]{2,3}", w) for k, w in e.items()), "einheiten: höchstens 50, Code wie HUR")
     return v
+RAND = 0.005
+BETRAG = re.compile(r"-?\d[\d. ]*[,.] ?\d{2}")
+DATUM = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})")
+SATZ = r"(\d{1,2}(?:[,.]\d{1,2})?)"
+class Wort(NamedTuple):
+    text: str
+    x0: float
+    top: float
+    x1: float
+    bottom: float
+Seite = list[Wort]
+def woerter_aus_pdf(pdf: Path) -> list[Seite]:
+    with pdfplumber.open(pdf) as d:
+        return [[Wort(w["text"], w["x0"] / s.width, w["top"] / s.height, w["x1"] / s.width, w["bottom"] / s.height)
+                 for w in s.extract_words()] for s in d.pages]
+def zeilen(woerter: Seite) -> list[list[Wort]]:
+    if not woerter:
+        return []
+    tol = statistics.median(w.bottom - w.top for w in woerter) / 2
+    mitte = lambda w: (w.top + w.bottom) / 2
+    ergebnis: list[list[Wort]] = []
+    for w in sorted(woerter, key=mitte):
+        if ergebnis and mitte(w) - mitte(ergebnis[-1][0]) <= tol:
+            ergebnis[-1].append(w)
+        else:
+            ergebnis.append([w])
+    return [sorted(z, key=lambda w: w.x0) for z in ergebnis]
+def _norm(t: str) -> str:
+    return "".join(t.split()).lower()
+def treffer(seite: Seite, text: str, ocr: bool = False) -> list[tuple[float, float, float, str | None]]:
+    """Wortfolgen einer Zeile, die dem Ankertext entsprechen; {satz} liest eine Zahl."""
+    teile = _norm(text).split("{satz}")
+    muster = re.compile(SATZ.join(map(re.escape, teile))) if len(teile) == 2 else None
+    ziel, n = _norm(text), len(text.split()) + 2
+    genau, unscharf = [], []
+    for z in zeilen(seite):
+        for i in range(len(z)):
+            for j in range(i + 1, min(i + n, len(z)) + 1):
+                kette = _norm("".join(w.text for w in z[i:j]))
+                if muster:
+                    m = muster.fullmatch(kette)
+                    if m:
+                        genau.append((z[i].x0, z[i].top, z[j - 1].x1, m.group(1).replace(",", ".")))
+                elif kette == ziel:
+                    genau.append((z[i].x0, z[i].top, z[j - 1].x1, None))
+                elif ocr and difflib.SequenceMatcher(None, kette, ziel).ratio() >= 0.85:
+                    unscharf.append((z[i].x0, z[i].top, z[j - 1].x1, None))
+    return genau or unscharf
+def finde_anker(seiten, anker, seite, ocr=False):
+    x, y = anker["rahmen"][:2]
+    reihenfolge = range(len(seiten)) if seite == "erste" else range(len(seiten) - 1, -1, -1)
+    for i in reihenfolge:
+        t = treffer(seiten[i], anker["text"], ocr)
+        if t:
+            tx, ty, _, _ = min(t, key=lambda h: (h[0] - x) ** 2 + (h[1] - y) ** 2)
+            return i, tx - x, ty - y
+    return None
+def woerter_im_rahmen(seite, rahmen, dx=0.0, dy=0.0):
+    x0, y0, x1, y1 = rahmen[0] + dx - RAND, rahmen[1] + dy - RAND, rahmen[2] + dx + RAND, rahmen[3] + dy + RAND
+    return [w for w in seite if x0 <= (w.x0 + w.x1) / 2 <= x1 and y0 <= (w.top + w.bottom) / 2 <= y1]
+def _spur(rahmen, dx: float, dy: float) -> list[float]:
+    """Rahmen um den Seitenversatz verschoben, auf 4 Stellen gerundet (für die Spur)."""
+    return [round(rahmen[0] + dx, 4), round(rahmen[1] + dy, 4), round(rahmen[2] + dx, 4), round(rahmen[3] + dy, 4)]
+def feld_text(seiten, v, name, ocr=False, spur=None):
+    f = v["felder"].get(name)
+    if not f:
+        return None
+    if "anker" in f:
+        gefunden = finde_anker(seiten, f["anker"], f["seite"], ocr)
+        if gefunden is None:
+            if name in PFLICHT_FELDER:
+                raise BereichsFehler(f"Anker „{f['anker']['text']}“ nicht gefunden (Vorlage {v['name']})")
+            return None
+        i, dx, dy = gefunden
+    else:   # ohne Anker: Seitenversatz des Nummer-Ankers übernehmen (Druckweg verschiebt die ganze Seite)
+        i, dx, dy = (0 if f["seite"] == "erste" else len(seiten) - 1), 0.0, 0.0
+        n = v["felder"].get("nummer")
+        if name != "nummer" and n and "anker" in n:
+            g = finde_anker(seiten, n["anker"], n["seite"], ocr)
+            if g and g[0] == i:
+                dx, dy = g[1], g[2]
+    if spur is not None:
+        spur[name] = {"seite": i, "rahmen": _spur(f["rahmen"], dx, dy)}
+    return i, [" ".join(w.text for w in z) for z in zeilen(woerter_im_rahmen(seiten[i], f["rahmen"], dx, dy))]
