@@ -77,10 +77,29 @@ def _vorlage(entwurf: Path) -> dict:
     if datei.stat().st_size > MAX_BYTES:
         raise ValueError(f"Vorlage zu groß (höchstens {MAX_BYTES} Byte)")
     return json.loads(datei.read_text(encoding="utf-8"))
-def _pruefe_entwurf(entwurf: Path) -> None:
-    """Erhöhter Lauf: Entwurfsordner, vorlage.json, muster/ und Muster ohne Reparse-Points."""
-    for p in (entwurf, entwurf / "vorlage.json", entwurf / "muster", *_muster(entwurf)):
+def _pruefe_entwurf(entwurf: Path) -> list[Path]:
+    """Erhöhter Lauf: Entwurfsordner, vorlage.json, muster/ und Muster ohne Reparse-Points; die geprüften Muster."""
+    muster = _muster(entwurf)
+    if len(muster) > MAX_MUSTER:
+        raise ValueError(f"höchstens {MAX_MUSTER} Muster")
+    for p in (entwurf, entwurf / "vorlage.json", entwurf / "muster", *muster):
         _kein_link(p)
+    return muster
+def _kopiere(quelle: Path, ziel: Path, grenze: int) -> None:
+    """Höchstens `grenze` Byte kopieren; größer → Fehler (die Quelle kann inzwischen getauscht sein)."""
+    with open(quelle, "rb") as f:
+        daten = f.read(grenze + 1)
+    if len(daten) > grenze:
+        raise ValueError(f"{quelle.name}: zu groß (höchstens {grenze} Byte)")
+    ziel.write_bytes(daten)
+def _kopie(entwurf: Path, muster: list[Path], ordner: Path) -> Path:
+    """Geprüften Entwurf in den Arbeitsordner des Admins kopieren; geprüft und geschrieben wird nur die Kopie."""
+    kopie = ordner / "entwurf"
+    (kopie / "muster").mkdir(parents=True)
+    _kopiere(entwurf / "vorlage.json", kopie / "vorlage.json", MAX_BYTES)
+    for m in muster:
+        _kopiere(m, kopie / "muster" / m.name, MAX_PDF)
+    return kopie
 def probelauf(entwurf: Path, k, v: dict | None = None) -> dict:
     """`v` übergibt `aktivieren`: geprüft wird genau die Fassung, die danach geschrieben wird."""
     try:
@@ -128,12 +147,14 @@ def aktivieren(entwurf: Path, konfig: Path, benutzer: str) -> dict:
     tmp = None
     try:
         angelernt = _ordner(konfig)
-        _pruefe_entwurf(entwurf)
-        # eigener Arbeitsordner des erhöhten Prozesses, nie der des Benutzers (Umleitung per Junction)
-        with tempfile.TemporaryDirectory(prefix="aktivieren-") as arbeit:
-            k = _konfig(konfig, Path(arbeit))
-            v = _vorlage(entwurf)                  # einmal lesen: der Entwurf kann sich während der Prüfung ändern
-            p = probelauf(entwurf, k, v)           # Schema, Namen, alle Muster, Konflikte, Mustang
+        muster = _pruefe_entwurf(entwurf)
+        # Arbeitsordner neben konfig.json (nur Admins schreiben dort), nie %TEMP% oder der Ordner des Benutzers:
+        # bei runas im Admin-Approval-Modus gehören beide dem Benutzer (Umleitung per Junction)
+        with tempfile.TemporaryDirectory(prefix="aktivieren-", dir=konfig.parent) as arbeit:
+            kopie = _kopie(entwurf, muster, Path(arbeit))
+            k = _konfig(konfig, Path(arbeit) / "arbeit")
+            v = _vorlage(kopie)                    # einmal lesen; geschrieben wird genau diese Fassung
+            p = probelauf(kopie, k, v)             # Schema, Namen, alle Muster, Konflikte, Mustang
         if p["vorlage_fehler"]:
             return {"ok": False, "meldung": p["vorlage_fehler"]}
         if not p["bereit"]:

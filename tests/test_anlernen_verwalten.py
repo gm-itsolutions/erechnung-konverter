@@ -138,6 +138,7 @@ def test_aktivieren_nicht_im_benutzer_arbeitsordner(umgebung, monkeypatch):
     monkeypatch.setattr(verwalten, "_konfig", konf)
     assert aktivieren(e, konfig, "kasse")["ok"] is True
     assert genutzt and genutzt[0] != benutzer_arbeit and not genutzt[0].exists()
+    assert genutzt[0].parent.parent == konfig.parent and genutzt[0].parent.name.startswith("aktivieren-")
     assert [p.name for p in benutzer_arbeit.iterdir()] == ["fremd.txt"]
 def test_kaputte_muster_pdf(umgebung, monkeypatch):
     e, k, konfig = umgebung       # I2: Parserfehler je Muster, kein Traceback
@@ -182,3 +183,16 @@ def test_protokoll_fehler_kippt_ergebnis_nicht(umgebung, monkeypatch):
     r = aktivieren(e, konfig, "kasse")
     assert r["ok"] is True and "Protokoll nicht geschrieben" in r["meldung"]
     assert (konfig.parent / "vorlagen" / "angelernt" / "test-bereiche.yml").exists()
+def test_aktivieren_prueft_kopie(umgebung, monkeypatch):
+    e, k, konfig = umgebung       # nach der Prüfung getauschte Dateien im Entwurf wirken nicht
+    monkeypatch.setattr(verwalten, "_konfig", lambda konfig, arbeit: k)
+    echt = verwalten._kopie
+    def tauschen(entwurf, muster, ordner):
+        kopie = echt(entwurf, muster, ordner)
+        (entwurf / "muster" / "m2.pdf").write_bytes(b"kein pdf")
+        (entwurf / "vorlage.json").write_text("{}", encoding="utf-8")
+        return kopie
+    monkeypatch.setattr(verwalten, "_kopie", tauschen)
+    assert aktivieren(e, konfig, "kasse")["ok"] is True
+    datei = konfig.parent / "vorlagen" / "angelernt" / "test-bereiche.yml"
+    assert pruefe_bereichsvorlage(yaml.safe_load(datei.read_text(encoding="utf-8")))["name"] == "test-bereiche"
