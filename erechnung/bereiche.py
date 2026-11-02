@@ -16,7 +16,8 @@ PFLICHT_FELDER = ("nummer", "datum", "summe_netto", "summe_brutto", "kaeufer")
 FELDER = (*PFLICHT_FELDER, "nummer_kontrolle", "leistungsdatum", "faellig", "zahlungsziel_tage", "summe_ust", "nachlass")
 SPALTEN = ("nr", "bezeichnung", "menge", "einheit", "menge_einheit", "einzelpreis", "ust_satz", "netto", "ignorieren")
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,39}")
-GERAETE = {"con", "prn", "aux", "nul", *(f"{g}{i}" for g in ("com", "lpt") for i in range(1, 10))}   # Windows-Gerätenamen
+GERAETE = {"con", "prn", "aux", "nul", *(f"{g}{i}" for g in ("com", "lpt") for i in range(10))}   # Windows-Gerätenamen
+MUSTER, MAX_PDF = re.compile(r"m[0-9]{1,3}"), 10 * 1024 * 1024   # Muster-ID im Entwurf, Größe je Muster-PDF
 class BereichsFehler(ValueError):
     pass
 def _ja(bedingung, meldung: str) -> None:

@@ -126,3 +126,59 @@ def test_probelauf_legt_arbeitsordner_an(umgebung):
     e, k, _ = umgebung            # erhöhter Lauf: Arbeitsordner kann fehlen
     k.arbeit.rmdir()
     assert probelauf(e, k)["bereit"] is True
+def test_aktivieren_nicht_im_benutzer_arbeitsordner(umgebung, monkeypatch):
+    import dataclasses
+    e, k, konfig = umgebung       # I1: erhöhter Lauf nimmt einen eigenen Arbeitsordner
+    benutzer_arbeit = k.arbeit
+    (benutzer_arbeit / "fremd.txt").write_text("x")
+    genutzt = []
+    def konf(konfig, arbeit):
+        genutzt.append(arbeit)
+        return dataclasses.replace(k, arbeit=arbeit)
+    monkeypatch.setattr(verwalten, "_konfig", konf)
+    assert aktivieren(e, konfig, "kasse")["ok"] is True
+    assert genutzt and genutzt[0] != benutzer_arbeit and not genutzt[0].exists()
+    assert [p.name for p in benutzer_arbeit.iterdir()] == ["fremd.txt"]
+def test_kaputte_muster_pdf(umgebung, monkeypatch):
+    e, k, konfig = umgebung       # I2: Parserfehler je Muster, kein Traceback
+    monkeypatch.setattr(verwalten, "_konfig", lambda konfig, arbeit: k)
+    (e / "muster" / "m2.pdf").write_bytes(b"kein pdf")
+    p = probelauf(e, k)
+    assert p["bereit"] is False and p["muster"][0]["ok"] and p["muster"][1]["fehler"]
+    r = aktivieren(e, konfig, "kasse")
+    assert r["ok"] is False and r["meldung"].startswith("m2:")
+def test_grenzen(umgebung, monkeypatch):
+    e, k, konfig = umgebung       # M1/M10: Größen und Anzahl vor dem Lesen
+    monkeypatch.setattr(verwalten, "_konfig", lambda konfig, arbeit: k)
+    (e / "muster" / "m.pdf").write_bytes(b"x")          # M2: unpassender Name wird übersprungen
+    assert probelauf(e, k)["bereit"] is True
+    monkeypatch.setattr(verwalten, "MAX_MUSTER", 1)
+    assert "höchstens 1 Muster" in probelauf(e, k)["vorlage_fehler"]
+    monkeypatch.setattr(verwalten, "MAX_MUSTER", 20)
+    monkeypatch.setattr(verwalten, "MAX_PDF", 100)
+    assert "zu groß" in probelauf(e, k)["muster"][0]["fehler"]
+    monkeypatch.setattr(verwalten, "MAX_PDF", 10 * 1024 * 1024)
+    groesse = (e / "vorlage.json").stat().st_size
+    monkeypatch.setattr(verwalten, "MAX_BYTES", groesse - 1)
+    assert "zu groß" in probelauf(e, k)["vorlage_fehler"]
+    monkeypatch.setattr(verwalten, "MAX_BYTES", groesse)   # JSON passt, YAML mit angelernt-Stempel nicht
+    r = aktivieren(e, konfig, "kasse")
+    assert r["ok"] is False and "zu groß" in r["meldung"]
+    assert not list((konfig.parent / "vorlagen" / "angelernt").glob("*.yml*"))
+def test_aktivieren_lehnt_verknuepfung_ab(umgebung, monkeypatch, tmp_path):
+    e, k, konfig = umgebung       # M6: Symlink im Entwurf
+    monkeypatch.setattr(verwalten, "_konfig", lambda konfig, arbeit: k)
+    echt = tmp_path / "echt.pdf"
+    (e / "muster" / "m2.pdf").rename(echt)
+    (e / "muster" / "m2.pdf").symlink_to(echt)
+    r = aktivieren(e, konfig, "kasse")
+    assert r["ok"] is False and "Verknüpfung" in r["meldung"]
+def test_protokoll_fehler_kippt_ergebnis_nicht(umgebung, monkeypatch):
+    e, k, konfig = umgebung       # M5
+    monkeypatch.setattr(verwalten, "_konfig", lambda konfig, arbeit: k)
+    def kaputt(*a, **kw):
+        raise OSError("voll")
+    monkeypatch.setattr(verwalten, "_protokoll", kaputt)
+    r = aktivieren(e, konfig, "kasse")
+    assert r["ok"] is True and "Protokoll nicht geschrieben" in r["meldung"]
+    assert (konfig.parent / "vorlagen" / "angelernt" / "test-bereiche.yml").exists()

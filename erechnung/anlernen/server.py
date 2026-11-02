@@ -6,18 +6,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 import pypdfium2 as pdfium
-from ..bereiche import FELDER, GERAETE, BereichsFehler, Wort, _betrag, _datum, _feld, _nummer, _tage, feld_text, woerter_aus_pdf
+from ..bereiche import FELDER, GERAETE, MAX_PDF, MUSTER, NAME, BereichsFehler, Wort, _betrag, _datum, _feld, _nummer, _tage, feld_text, woerter_aus_pdf
 from ..modell import de
 from ..ueberwachen import lade_konfig
 from ..vorlagen import MIN_ZEICHEN, pdf_text
 log = logging.getLogger("erechnung.anlernen")
 STATISCH = Path(__file__).parent / "statisch"
-NAME, MUSTER = re.compile(r"[a-z0-9][a-z0-9-]{1,39}"), re.compile(r"m[0-9]{1,3}")
 MAX_HOEHE = 6000    # Pixel; 1400 breit, A4 = 1980
 MAX_SEITEN, DATEINAME = 20, re.compile(r"[\w .-]{1,80}")
 LESER = {"nummer": _nummer, "nummer_kontrolle": _nummer, "datum": _datum, "leistungsdatum": _datum, "faellig": _datum,
          "zahlungsziel_tage": _tage, "summe_netto": _betrag, "summe_ust": _betrag, "summe_brutto": _betrag, "nachlass": _betrag}
-MAX_PDF, MAX_JSON, LEERLAUF, TOKEN_FRIST = 10 * 1024 * 1024, 64 * 1024, 30 * 60, 60
+MAX_JSON, LEERLAUF, TOKEN_FRIST = 64 * 1024, 30 * 60, 60
 TYPEN = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".json": "application/json"}
 CSP = "default-src 'self'; img-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"

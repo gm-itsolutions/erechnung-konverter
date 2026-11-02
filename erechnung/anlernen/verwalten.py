@@ -3,20 +3,28 @@
 import hashlib
 import json
 import os
+import stat
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 import yaml
-from ..bereiche import GERAETE, NAME, positionen_aus_bereichen, pruefe_bereichsvorlage, rechnung_aus_bereichen, woerter_aus_pdf
+from ..bereiche import GERAETE, MAX_PDF, MUSTER, NAME, positionen_aus_bereichen, pruefe_bereichsvorlage, rechnung_aus_bereichen, woerter_aus_pdf
 from ..cii import erzeuge_cii
 from ..modell import de, summenabgleich
 from ..ueberwachen import ANGELERNT, lade_konfig
 from ..vorlagen import MAX_BYTES, STANDARD, _lade_datei, lade_vorlagen, lies_rechnung
 
-MIN_MUSTER = 2
+MIN_MUSTER, MAX_MUSTER = 2, 20
 def _konfig(konfig: Path, arbeit: Path):            # in Tests ersetzbar
     return lade_konfig(konfig, arbeit=arbeit)
+def _kein_link(p: Path) -> None:
+    """Erhöhter Lauf: keine Symlinks/Junctions (Reparse-Points) aus dem Benutzerprofil folgen."""
+    st = os.lstat(p)
+    if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        raise ValueError(f"{p.name}: Verknüpfung nicht erlaubt")
 def _muster(entwurf: Path) -> list[Path]:
-    return sorted((entwurf / "muster").glob("m*.pdf"), key=lambda p: int(p.stem[1:]))
+    m = [p for p in (entwurf / "muster").glob("m*.pdf") if MUSTER.fullmatch(p.stem)]
+    return sorted(m, key=lambda p: int(p.stem[1:]))
 def _mitgeliefert(k) -> set[str]:
     """Namen der mitgelieferten und der Zusatz-Vorlagen (Programmordner `vorlagen\\`, nicht `angelernt`)."""
     zusatz = [o for o in k.vorlagen_ordner if o.name != ANGELERNT]
@@ -33,6 +41,8 @@ def _ein_muster(pdf: Path, v: dict, andere: list[dict], k) -> dict:
         finally:
             getattr(g, "close", lambda: None)()
     try:
+        if pdf.stat().st_size > MAX_PDF:
+            raise ValueError(f"Muster zu groß (höchstens {MAX_PDF // 1024 // 1024} MB)")
         # derselbe Weg wie der Überwacher: Vorlagensuche (Konflikt „mehrere Vorlagen“), Lesarten der Texterkennung
         r = lies_rechnung(pdf, [*andere, v], k.verkaeufer, ocr=ocr if k.ocr else None)
         if r.vorlage != v["name"]:
@@ -59,9 +69,18 @@ def _ein_muster(pdf: Path, v: dict, andere: list[dict], k) -> dict:
         erg["ok"] = True
     except (ValueError, OSError) as e:             # OSError: Muster oder Arbeitsordner nicht lesbar
         erg["fehler"] = str(e)
+    except Exception as e:                         # PDF-Parser (PdfminerException u. a.): dieses Muster rot, kein Abbruch
+        erg["fehler"] = f"Muster nicht lesbar ({type(e).__name__}: {e})"
     return erg
 def _vorlage(entwurf: Path) -> dict:
-    return json.loads((entwurf / "vorlage.json").read_text(encoding="utf-8"))
+    datei = entwurf / "vorlage.json"
+    if datei.stat().st_size > MAX_BYTES:
+        raise ValueError(f"Vorlage zu groß (höchstens {MAX_BYTES} Byte)")
+    return json.loads(datei.read_text(encoding="utf-8"))
+def _pruefe_entwurf(entwurf: Path) -> None:
+    """Erhöhter Lauf: Entwurfsordner, vorlage.json, muster/ und Muster ohne Reparse-Points."""
+    for p in (entwurf, entwurf / "vorlage.json", entwurf / "muster", *_muster(entwurf)):
+        _kein_link(p)
 def probelauf(entwurf: Path, k, v: dict | None = None) -> dict:
     """`v` übergibt `aktivieren`: geprüft wird genau die Fassung, die danach geschrieben wird."""
     try:
@@ -71,7 +90,9 @@ def probelauf(entwurf: Path, k, v: dict | None = None) -> dict:
             raise ValueError(f"Name {v['name']} ist unter Windows reserviert")
         if v["name"] in _mitgeliefert(k):
             raise ValueError(f"Name {v['name']} ist mitgeliefert, bitte anderen Namen wählen")
-    except ValueError as e:
+        if len(_muster(entwurf)) > MAX_MUSTER:
+            raise ValueError(f"höchstens {MAX_MUSTER} Muster")
+    except (ValueError, OSError) as e:
         return {"vorlage_fehler": str(e), "muster": [], "bereit": False}
     k.arbeit.mkdir(parents=True, exist_ok=True)     # Texterkennung und Mustang arbeiten dort
     andere = [x for x in k.vorlagen if x["name"] != v["name"]]   # gleichnamige aktive wird ersetzt (Spec 7.4)
@@ -96,12 +117,23 @@ def _weg(datei: Path, angelernt: Path, name: str) -> None:
     """Vorhandene Datei mit Stempel nach deaktiviert/ (ersetzte oder verdrängte Fassung)."""
     if datei.exists():
         os.replace(datei, angelernt / "deaktiviert" / f"{name}-{_stempel()}.yml")
-def aktivieren(entwurf: Path, konfig: Path, benutzer: str, arbeit: Path | None = None) -> dict:
+def _protokoll_hinweis(*args, **kw) -> str:
+    """Protokoll nach getaner Aktion: scheitert nur das Schreiben, bleibt die Aktion gültig."""
+    try:
+        _protokoll(*args, **kw)
+        return ""
+    except OSError as e:
+        return f" (Protokoll nicht geschrieben: {e})"
+def aktivieren(entwurf: Path, konfig: Path, benutzer: str) -> dict:
+    tmp = None
     try:
         angelernt = _ordner(konfig)
-        k = _konfig(konfig, arbeit or konfig.parent / "arbeit")
-        v = _vorlage(entwurf)                      # einmal lesen: der Entwurf kann sich während der Prüfung ändern
-        p = probelauf(entwurf, k, v)               # Schema, Namen, alle Muster, Konflikte, Mustang
+        _pruefe_entwurf(entwurf)
+        # eigener Arbeitsordner des erhöhten Prozesses, nie der des Benutzers (Umleitung per Junction)
+        with tempfile.TemporaryDirectory(prefix="aktivieren-") as arbeit:
+            k = _konfig(konfig, Path(arbeit))
+            v = _vorlage(entwurf)                  # einmal lesen: der Entwurf kann sich während der Prüfung ändern
+            p = probelauf(entwurf, k, v)           # Schema, Namen, alle Muster, Konflikte, Mustang
         if p["vorlage_fehler"]:
             return {"ok": False, "meldung": p["vorlage_fehler"]}
         if not p["bereit"]:
@@ -118,10 +150,13 @@ def aktivieren(entwurf: Path, konfig: Path, benutzer: str, arbeit: Path | None =
         tmp.write_text(text, encoding="utf-8")
         _weg(ziel, angelernt, name)
         os.replace(tmp, ziel)
-        _protokoll(angelernt, "aktiviert", name, benutzer, ziel, len(p["muster"]))
-        return {"ok": True, "meldung": f"Vorlage {name} aktiviert"}
-    except (ValueError, OSError) as e:
-        return {"ok": False, "meldung": str(e)}
+        hinweis = _protokoll_hinweis(angelernt, "aktiviert", name, benutzer, ziel, len(p["muster"]))
+        return {"ok": True, "meldung": f"Vorlage {name} aktiviert{hinweis}"}
+    except Exception as e:                         # erhöhter CLI-Lauf: immer ein Ergebnis, nie ein Traceback
+        return {"ok": False, "meldung": str(e) if isinstance(e, (ValueError, OSError)) else f"{type(e).__name__}: {e}"}
+    finally:
+        if tmp:
+            tmp.unlink(missing_ok=True)
 def _verwalte(name, konfig: Path, benutzer: str, aktion: str) -> dict:
     if not isinstance(name, str) or not NAME.fullmatch(name) or name in GERAETE:
         return {"ok": False, "meldung": "Name ungültig: 2–40 Zeichen a–z, 0–9, Bindestrich"}
@@ -146,11 +181,11 @@ def _verwalte(name, konfig: Path, benutzer: str, aktion: str) -> dict:
             datei = aktiv if aktiv.exists() else aus
             if not datei.exists():
                 return {"ok": False, "meldung": f"Vorlage {name} nicht gefunden"}
-            _protokoll(angelernt, aktion, name, benutzer, datei)   # vorher, solange die Prüfsumme lesbar ist
+            hinweis = _protokoll_hinweis(angelernt, aktion, name, benutzer, datei)   # vorher, solange die Prüfsumme lesbar ist
             datei.unlink()
-            return {"ok": True, "meldung": f"Vorlage {name} gelöscht"}
-        _protokoll(angelernt, aktion, name, benutzer, datei)
-        return {"ok": True, "meldung": f"Vorlage {name} {aktion}"}
+            return {"ok": True, "meldung": f"Vorlage {name} gelöscht{hinweis}"}
+        hinweis = _protokoll_hinweis(angelernt, aktion, name, benutzer, datei)
+        return {"ok": True, "meldung": f"Vorlage {name} {aktion}{hinweis}"}
     except (ValueError, OSError) as e:
         return {"ok": False, "meldung": str(e)}
 def deaktivieren(name, konfig: Path, benutzer: str) -> dict:
