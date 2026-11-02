@@ -142,9 +142,10 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         leistungsdatum=datum(opt("leistungsdatum")) if opt("leistungsdatum") else None,
         faellig=faellig, vorlage=v["name"], nachlaesse=nachlaesse)
 def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
-                  ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None) -> Rechnung:
-    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden, liefert Lesarten (Name, Text))
-    und dieselbe Vorlagenlogik."""
+                  ocr: Callable[[Path], Iterable[tuple]] | None = None) -> Rechnung:
+    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden) und dieselbe Vorlagenlogik.
+    `ocr` liefert Lesarten (Name, Text), (Name, (Text, Seiten)) oder (Name, Text, Seiten) wie `ocr.erkenne_seiten`;
+    Regex-Vorlagen lesen nur den Text, Bereichsvorlagen die Wörter mit Lage (Seiten)."""
     text = pdf_text(pdf)
     if len(re.findall(r"\w", text)) >= MIN_ZEICHEN:
         v = finde_vorlage(text, vorlagen)
@@ -165,9 +166,9 @@ def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
     erster, versucht = None, []
     lesarten = iter(ocr(pdf))
     try:
-        for name, text in lesarten:
+        for name, text, *seiten in lesarten:
             versucht.append(name)
-            text, seiten = text if isinstance(text, tuple) else (text, None)   # (Text, Wörter je Seite), Task 05
+            text, seiten = text if isinstance(text, tuple) else (text, seiten[0] if seiten else None)
             try:
                 v = finde_vorlage(text, vorlagen)
                 if len(versucht) > 1 and "nummer_kontrolle" not in v["felder"]:

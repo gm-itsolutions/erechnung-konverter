@@ -20,7 +20,7 @@ class Konfig:
     arbeit: Path
     verkaeufer: Partei
     vorlagen: list[dict]
-    ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None   # Texterkennung für PDFs ohne Text: Lesarten (Name, Text)
+    ocr: Callable[[Path], Iterable[tuple]] | None = None   # Texterkennung für PDFs ohne Text: Lesarten (Name, Text, Seiten)
     pruefe: Callable[[Path], str] | None = None   # Mustang (XML → Kurzbericht, ValueError wenn ungültig); None → Fehler
     xml_einzeln: bool = False                  # zusätzlich <Nummer>.xml in den Ausgabeordner (Behörden, XRechnung)
     vorlagen_ordner: list[Path] = field(default_factory=list)   # Zusatz und angelernt, im Takt geprüft
@@ -64,7 +64,7 @@ def lade_konfig(datei: Path, arbeit: Path | None = None) -> Konfig:
     ordner = [datei.parent / "vorlagen", datei.parent / "vorlagen" / ANGELERNT]
     return Konfig(Path(d["eingang"]), Path(d["ausgabe"]), Path(d["originale"]), Path(d["fehler"]),
                   arbeit, v, lade_alle_vorlagen(ordner),
-                  partial(ocr.erkenne, arbeit=arbeit, aufruf=aufruf) if aufruf else None,
+                  partial(ocr.erkenne_seiten, arbeit=arbeit, aufruf=aufruf) if aufruf else None,
                   partial(mustang.pruefe, aufruf=pruefer) if pruefer else None,
                   d.get("xml_einzeln") is True, ordner, vorlagen_stand(ordner))
 def pruefe_ordner(k: Konfig) -> None:

@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 import pypdfium2 as pdfium
 from PIL import Image
+from .bereiche import Seite, Wort
 
 PAKET = Path(__file__).resolve().parents[2] / "tesseract"   # im ZIP: app\erechnung → ..\..\tesseract
 DPI = 300
@@ -44,9 +45,35 @@ def ohne_linien(quelle: Path, ziel: Path) -> None:
     im.save(ziel)
 
 
+def tsv_woerter(tsv: str, breite: int, hoehe: int) -> Seite:
+    """Tesseract-TSV: Ebene 5 = Wort; conf < 0 und leere Wörter verwerfen; Lage relativ zum Bild."""
+    woerter = []
+    for z in tsv.splitlines()[1:]:
+        f = z.split("\t")
+        if len(f) < 12 or f[0] != "5" or float(f[10]) < 0 or not f[11].strip():
+            continue
+        l, t, w, h = (int(x) for x in f[6:10])
+        woerter.append(Wort(f[11].strip(), l / breite, t / hoehe, (l + w) / breite, (t + h) / hoehe))
+    return woerter
+
+
 def erkenne(pdf: Path, arbeit: Path, aufruf: list[str]) -> Iterator[tuple[str, str]]:
     """Lesarten (Name, Text) nacheinander, erst bei Bedarf gelesen: jede Seite einmal mit pypdfium2 als Graustufenbild
     gerendert, dann je Lesart mit `aufruf` (tesseract) -l deu gelesen. Nach GESAMTFRIST keine weitere Lesart."""
+    lesarten = _lesarten(pdf, arbeit, aufruf, tsv=False)
+    try:
+        for name, text, _ in lesarten:
+            yield name, text
+    finally:
+        lesarten.close()
+
+
+def erkenne_seiten(pdf: Path, arbeit: Path, aufruf: list[str]) -> Iterator[tuple[str, str, list[Seite]]]:
+    """Wie `erkenne`, je Lesart zusätzlich die Wörter mit Lage je Seite (Tesseract `txt tsv` in einem Lauf)."""
+    yield from _lesarten(pdf, arbeit, aufruf, tsv=True)
+
+
+def _lesarten(pdf: Path, arbeit: Path, aufruf: list[str], tsv: bool) -> Iterator[tuple[str, str, list[Seite] | None]]:
     start = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="ocr-", dir=arbeit) as tmp:
         d = pdfium.PdfDocument(pdf)
@@ -56,22 +83,24 @@ def erkenne(pdf: Path, arbeit: Path, aufruf: list[str]) -> Iterator[tuple[str, s
             bilder = []
             for i, s in enumerate(d):
                 skala = min(DPI / 72, MAX_PIXEL / max(s.get_size()))
-                bilder.append((Path(tmp) / f"{i}.png", round(skala * 72)))
-                s.render(scale=skala, grayscale=True).to_pil().save(bilder[-1][0])
+                pil = s.render(scale=skala, grayscale=True).to_pil()
+                bilder.append((Path(tmp) / f"{i}.png", round(skala * 72), pil.size))
+                pil.save(bilder[-1][0])
         finally:
             d.close()   # vor der Erkennung schließen: Windows sperrt sonst das PDF
         for n, (name, psm, linien_weg) in enumerate(LESARTEN):
             if n and time.monotonic() - start > GESAMTFRIST:
                 return
-            seiten = []
-            for i, (bild, dpi) in enumerate(bilder):
+            seiten, woerter = [], []
+            for i, (bild, dpi, groesse) in enumerate(bilder):
                 if linien_weg:
                     if not (ohne := bild.with_name(f"{i}-ohne-linien.png")).exists():
                         ohne_linien(bild, ohne)
                     bild = ohne
                 basis = Path(tmp) / f"{i}-{n}"
                 try:
-                    subprocess.run([*aufruf, str(bild), str(basis), "-l", "deu", "--psm", str(psm), "--dpi", str(dpi)],
+                    subprocess.run([*aufruf, str(bild), str(basis), "-l", "deu", "--psm", str(psm), "--dpi", str(dpi),
+                                    *(("txt", "tsv") if tsv else ())],
                                    check=True, capture_output=True, timeout=FRIST,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 except subprocess.CalledProcessError as e:
@@ -80,4 +109,6 @@ def erkenne(pdf: Path, arbeit: Path, aufruf: list[str]) -> Iterator[tuple[str, s
                 except (subprocess.TimeoutExpired, OSError) as e:
                     raise ValueError(f"Texterkennung fehlgeschlagen (Seite {i + 1}): {e}") from None
                 seiten.append(basis.with_suffix(".txt").read_text(encoding="utf-8"))
-            yield name, bereinige("\n".join(s.rstrip("\n\f") for s in seiten))
+                if tsv:
+                    woerter.append(tsv_woerter(basis.with_suffix(".tsv").read_text(encoding="utf-8"), *groesse))
+            yield name, bereinige("\n".join(s.rstrip("\n\f") for s in seiten)), woerter if tsv else None
