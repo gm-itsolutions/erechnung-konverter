@@ -159,7 +159,7 @@ Jede Verletzung → `SummenFehler` mit Klartext (z. B. „Netto: Positionen 1.19
 - `gm-update.json` (in `einrichten/`):
   - `probe`: `["aktuell/python/python.exe", "-m", "erechnung", "--version"]` – importiert alle Abhängigkeiten, Frist 60 s
   - `stopp`/`start`: `Stop-`/`Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung'`
-- Eigenes `gm-update.exe` als SYSTEM-Aufgabe `GM-IT\Update erechnung-konverter` (legt `gm-update installieren` an). Version **0.1.3** (letzte freigegebene; PR #6 aus main ist nicht freigegeben).
+- Eigenes `gm-update.exe` als SYSTEM-Aufgabe `GM-IT\Update erechnung-konverter` (legt `gm-update installieren` an). Version **0.1.4** (mit PR #6: Token und Konfiguration mit eingeschränkter DACL angelegt, Ordnerprüfung vor dem Anlegen, ProgramFilesDir aus HKLM).
 - Lesetoken je Kunde `update-<kunde>`, im Test `update-test` (`/root/.config/gm-it-os/update-test.token`).
 - CI: `.forgejo/workflows/release.yml` nach gm-update-Vorlage, `release/bauen.sh` lädt Python-Embed mit fester SHA-256 und installiert Wheels mit `--require-hashes --no-deps --only-binary=:all: --platform win_amd64 --python-version 3.14 --target`.
 

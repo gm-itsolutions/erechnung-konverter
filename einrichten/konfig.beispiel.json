@@ -1,0 +1,18 @@
+{
+  "eingang": "C:\\E-Rechnung\\Eingang",
+  "ausgabe": "C:\\E-Rechnung\\E-Rechnungen",
+  "originale": "C:\\E-Rechnung\\Originale",
+  "fehler": "C:\\E-Rechnung\\Fehler",
+  "verkaeufer": {
+    "name": "…",
+    "strasse": "…",
+    "plz": "…",
+    "ort": "…",
+    "land": "DE",
+    "ust_id": "DE…",
+    "steuernummer": "",
+    "email": "…",
+    "iban": "DE…",
+    "bic": "…"
+  }
+}
