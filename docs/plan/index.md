@@ -31,15 +31,15 @@
 
 | Nr | Datei | Titel | Wer | Umfang | Hängt ab von | Status |
 |---|---|---|---|---|---|---|
-| 01 | `task-01-geruest-modell.md` | Gerüst, Modell, Summenabgleich | Subagent | 45 Min. | – | offen |
-| 02 | `task-02-testdaten.md` | Testhilfen, Lexware-Testdaten, Betragsleser | Subagent | 45 Min. | 01 (nur Step 0) | offen |
-| 03 | `task-03-cii-facturx.md` | CII-XML (EN16931) und Einbetten mit factur-x | Subagent | 60 Min. | 01, 02 | offen |
-| 04 | `task-04-vorlagen.md` | Vorlagen-Auswertung und Vorlage Lexware | Subagent | 75 Min. | 01, 02 | offen |
-| 05 | `task-05-ueberwacher.md` | Überwacher, Konfiguration, CLI | Subagent | 60 Min. | 03, 04 | offen |
-| 06 | `task-06-paket-ci.md` | CI (Tests, Paket), Windows-ZIP, Release-CI | Subagent | 60 Min. | 01 | offen |
-| 07 | `task-07-einrichtung.md` | `einrichten.ps1`, `gm-update.json`, Runbook | Subagent | 45 Min. | – | offen |
-| 08 | `task-08-pruefung.md` | Mustang-Prüfung, Echt-Tests gegen Lexware-XML | Subagent | 30 Min. | 02, 05 | offen |
-| 09 | `task-09-release-010.md` | Tag `v0.1.0`, CI grün, Artefakt prüfen | Claude (Hauptsitzung) | 15 Min. | 06, 07, 08 | offen |
+| 01 | `task-01-geruest-modell.md` | Gerüst, Modell, Summenabgleich | Subagent | 45 Min. | – | erledigt (main fbc7e50 + task-08) |
+| 02 | `task-02-testdaten.md` | Testhilfen, Lexware-Testdaten, Betragsleser | Subagent | 45 Min. | 01 (nur Step 0) | erledigt (main fbc7e50 + task-08) |
+| 03 | `task-03-cii-facturx.md` | CII-XML (EN16931) und Einbetten mit factur-x | Subagent | 60 Min. | 01, 02 | erledigt (main fbc7e50 + task-08) |
+| 04 | `task-04-vorlagen.md` | Vorlagen-Auswertung und Vorlage Lexware | Subagent | 75 Min. | 01, 02 | erledigt (main fbc7e50 + task-08) |
+| 05 | `task-05-ueberwacher.md` | Überwacher, Konfiguration, CLI | Subagent | 60 Min. | 03, 04 | erledigt (main fbc7e50 + task-08) |
+| 06 | `task-06-paket-ci.md` | CI (Tests, Paket), Windows-ZIP, Release-CI | Subagent | 60 Min. | 01 | erledigt (main fbc7e50 + task-08) |
+| 07 | `task-07-einrichtung.md` | `einrichten.ps1`, `gm-update.json`, Runbook | Subagent | 45 Min. | – | erledigt (main fbc7e50 + task-08) |
+| 08 | `task-08-pruefung.md` | Mustang-Prüfung, Echt-Tests gegen Lexware-XML | Subagent | 30 Min. | 02, 05 | erledigt ohne Mustang (offen: Marvin, docs/pruefung.md) |
+| 09 | `task-09-release-010.md` | Tag `v0.1.0`, CI grün, Artefakt prüfen | Claude (Hauptsitzung) | 15 Min. | 06, 07, 08 | erledigt (v0.1.0, ZIP d50ebcdc…) |
 | 10 | `task-10-vm-test-app.md` | VM 108: Einrichtung und Druck ohne Freigabe | Subagent | 90 Min. | 09 | offen |
 | 11 | `task-11-freigabe-010.md` | Freigabe `v0.1.0` per YubiKey | **Marvin** | 5 Min. | 09 | offen |
 | 12 | `task-12-vm-test-update.md` | VM 108: Erstinstallation über gm-update | Subagent | 30 Min. | 10, 11 | offen |
