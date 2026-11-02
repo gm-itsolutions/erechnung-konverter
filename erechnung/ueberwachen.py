@@ -1,6 +1,6 @@
 """Ordnerüberwachung: Eingang → E-Rechnung oder Fehlerdatei (Spezifikation Abschnitt 3, 6, 7)."""
 import json, logging, os, re, shutil, time, traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -10,6 +10,7 @@ from .cii import bette_ein, erzeuge_cii
 from .modell import Partei, SummenFehler, summenabgleich
 from .vorlagen import OCR_HINWEIS, STANDARD, lade_vorlagen, lies_rechnung
 log = logging.getLogger("erechnung")
+ANGELERNT = "angelernt"
 @dataclass
 class Konfig:
     eingang: Path
@@ -22,17 +23,50 @@ class Konfig:
     ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None   # Texterkennung für PDFs ohne Text: Lesarten (Name, Text)
     pruefe: Callable[[Path], str] | None = None   # Mustang (XML → Kurzbericht, ValueError wenn ungültig); None → Fehler
     xml_einzeln: bool = False                  # zusätzlich <Nummer>.xml in den Ausgabeordner (Behörden, XRechnung)
-def lade_konfig(datei: Path) -> Konfig:
+    vorlagen_ordner: list[Path] = field(default_factory=list)   # Zusatz und angelernt, im Takt geprüft
+    vorlagen_stand: tuple = ()
+def vorlagen_stand(ordner: list[Path]) -> tuple:
+    return tuple((str(f), f.stat().st_mtime_ns, f.stat().st_size)
+                 for o in ordner if o.is_dir() for f in sorted(o.glob("*.yml")))
+def lade_alle_vorlagen(ordner: list[Path]) -> list[dict]:
+    """Mitgelieferte streng (Paketfehler → Abbruch), Zusatz/angelernt tolerant; bei gleichem Namen gewinnt die mitgelieferte."""
+    vorlagen = lade_vorlagen(STANDARD)
+    namen = {v["name"] for v in vorlagen}
+    for v in lade_vorlagen(*ordner, tolerant=True):
+        if v["name"] in namen:
+            log.warning("Vorlage %s übersprungen: gleichnamige Vorlage ist mitgeliefert bzw. schon geladen", v["name"])
+            continue
+        namen.add(v["name"])
+        vorlagen.append(v)
+    return vorlagen
+def aktualisiere_vorlagen(k: Konfig) -> bool:
+    try:
+        stand = vorlagen_stand(k.vorlagen_ordner)
+    except OSError:                             # Datei zwischen glob und stat gelöscht → nächster Takt
+        return False
+    if stand == k.vorlagen_stand:
+        return False
+    try:
+        neu = lade_alle_vorlagen(k.vorlagen_ordner)
+    except Exception as e:                      # alte Vorlagen behalten, Stand merken: kein Log pro Takt
+        log.error("Vorlagen nicht neu geladen, bisherige bleiben aktiv: %s", e)
+        k.vorlagen_stand = stand
+        return False
+    k.vorlagen, k.vorlagen_stand = neu, stand
+    log.info("Vorlagen neu geladen: %s", ", ".join(v["name"] for v in neu))
+    return True
+def lade_konfig(datei: Path, arbeit: Path | None = None) -> Konfig:
     d = json.loads(datei.read_text(encoding="utf-8-sig"))  # PowerShell schreibt gern mit BOM
     v = Partei(**d["verkaeufer"])
     if not (v.name and (v.ust_id or v.steuernummer) and v.iban):
         raise ValueError("konfig.json: verkaeufer braucht name, ust_id oder steuernummer und iban")
-    arbeit, aufruf, pruefer = datei.parent / "arbeit", ocr.tesseract(), mustang.mustang()
+    arbeit, aufruf, pruefer = arbeit or datei.parent / "arbeit", ocr.tesseract(), mustang.mustang()
+    ordner = [datei.parent / "vorlagen", datei.parent / "vorlagen" / ANGELERNT]
     return Konfig(Path(d["eingang"]), Path(d["ausgabe"]), Path(d["originale"]), Path(d["fehler"]),
-                  arbeit, v, lade_vorlagen(STANDARD, datei.parent / "vorlagen"),
+                  arbeit, v, lade_alle_vorlagen(ordner),
                   partial(ocr.erkenne, arbeit=arbeit, aufruf=aufruf) if aufruf else None,
                   partial(mustang.pruefe, aufruf=pruefer) if pruefer else None,
-                  d.get("xml_einzeln") is True)
+                  d.get("xml_einzeln") is True, ordner, vorlagen_stand(ordner))
 def pruefe_ordner(k: Konfig) -> None:
     """Keine Junction/Symlink, alles auf einem Laufwerk (os.replace), Arbeitsordner anlegen."""
     k.arbeit.mkdir(exist_ok=True)
@@ -99,6 +133,7 @@ def bearbeite(pdf: Path, k: Konfig) -> tuple[bool, str]:
         os.replace(pdf, k.fehler / f"{basis}.pdf")
         return False, grund
 def schritt(k: Konfig) -> int:
+    aktualisiere_vorlagen(k)
     for f in sorted(k.eingang.iterdir()):
         if f.is_file() and f.suffix.lower() == ".pdf":
             stempel = datetime.now().strftime("%Y%m%d-%H%M%S-%f")

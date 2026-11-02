@@ -1,9 +1,9 @@
-import json, os, subprocess, sys
+import json, os, shutil, subprocess, sys
 from pathlib import Path
 import pytest
 from facturx import get_xml_from_pdf
 from erechnung import __version__, mustang
-from erechnung.ueberwachen import _frei, lade_konfig, pruefe_ordner, schritt
+from erechnung.ueberwachen import _frei, aktualisiere_vorlagen, lade_alle_vorlagen, lade_konfig, pruefe_ordner, schritt, vorlagen_stand
 from hilfen import bild_pdf, pdf_aus_text
 from test_vorlagen import TEXT, VORLAGE
 REPO = Path(__file__).parents[1]
@@ -175,3 +175,42 @@ def test_ohne_tesseract(k):
     (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(["x"])))
     schritt(k)
     assert "kein Text" in next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
+
+BEISPIEL = Path(__file__).parent / "daten" / "bereiche-beispiel.yml"
+def test_lade_alle_tolerant(tmp_path, caplog):
+    zusatz, angelernt = tmp_path / "vorlagen", tmp_path / "vorlagen" / "angelernt"
+    angelernt.mkdir(parents=True)
+    shutil.copy(BEISPIEL, angelernt / "test-bereiche.yml")
+    (angelernt / "kaputt.yml").write_text("name: x\nart: bereiche\n", encoding="utf-8")
+    namen = [v["name"] for v in lade_alle_vorlagen([zusatz, angelernt])]
+    assert namen == ["lexware-gm-it", "test-bereiche"] and "kaputt.yml" in caplog.text
+def test_mitgeliefert_gewinnt(tmp_path, caplog):
+    angelernt = tmp_path / "angelernt"
+    angelernt.mkdir()
+    (angelernt / "lexware-gm-it.yml").write_text(
+        BEISPIEL.read_text(encoding="utf-8").replace("name: test-bereiche", "name: lexware-gm-it"), encoding="utf-8")
+    assert [v["name"] for v in lade_alle_vorlagen([angelernt])] == ["lexware-gm-it"]
+    assert "gleichnamig" in caplog.text
+def test_neuladen_im_takt(k, tmp_path):
+    angelernt = tmp_path / "neu-angelernt"
+    angelernt.mkdir()
+    k.vorlagen_ordner = [angelernt]
+    k.vorlagen_stand = vorlagen_stand(k.vorlagen_ordner)
+    assert aktualisiere_vorlagen(k) is False
+    shutil.copy(BEISPIEL, angelernt / "test-bereiche.yml")
+    assert aktualisiere_vorlagen(k) is True
+    assert "test-bereiche" in [v["name"] for v in k.vorlagen]
+    (angelernt / "test-bereiche.yml").unlink()
+    assert aktualisiere_vorlagen(k) is True
+    assert "test-bereiche" not in [v["name"] for v in k.vorlagen]
+def test_kaputte_mitgelieferte_behaelt_alte(k, monkeypatch, caplog):
+    alt = list(k.vorlagen)
+    k.vorlagen_stand = ("geändert",)
+    monkeypatch.setattr("erechnung.ueberwachen.lade_alle_vorlagen", lambda o: (_ for _ in ()).throw(ValueError("kaputt")))
+    assert aktualisiere_vorlagen(k) is False and k.vorlagen == alt and "kaputt" in caplog.text
+def test_lade_konfig_arbeit(tmp_path):
+    (tmp_path / "prog/vorlagen").mkdir(parents=True)
+    datei = konfig_datei(tmp_path)
+    k = lade_konfig(datei, arbeit=tmp_path / "eigene-arbeit")
+    assert k.arbeit == tmp_path / "eigene-arbeit"
+    assert k.vorlagen_ordner == [datei.parent / "vorlagen", datei.parent / "vorlagen" / "angelernt"]

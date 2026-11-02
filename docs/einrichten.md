@@ -101,9 +101,9 @@ Für einen Rechnungsaufbau, den die mitgelieferten Vorlagen nicht kennen:
 
 ```powershell
 Copy-Item .\meine-vorlage.yaml "$env:ProgramFiles\GM-IT\erechnung-konverter\vorlagen\"
-Stop-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung'
-Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung'
 ```
+
+Der Überwacher lädt Vorlagen in `vorlagen\` und `vorlagen\angelernt\` binnen einer Sekunde neu (Logzeile „Vorlagen neu geladen“). Eine fehlerhafte Datei wird mit Warnung übersprungen.
 
 Danach das betroffene PDF aus `Fehler` erneut nach `Eingang` kopieren. Bewährt sich die Vorlage, ins Repo übernehmen und mit dem nächsten Release ausliefern (dann die Kopie im Ordner `vorlagen\` entfernen).
 
