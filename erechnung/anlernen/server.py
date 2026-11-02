@@ -311,27 +311,24 @@ def _vorschau(h, z, name):
 def _probelauf(h, z, name):
     return json_antwort(verwalten.probelauf(entwurf_ordner(z, name), z.k))
 def _als_admin(z, aktion: str, ziel: str):
-    """`python.exe -m erechnung vorlage …` per UAC; Ergebnis in einen frischen Ordner, den nur dieser Aufruf kennt."""
-    ordner = Path(tempfile.mkdtemp(prefix="ergebnis-", dir=z.daten / "arbeit"))
-    datei = ordner / "ergebnis.json"
+    """`python.exe -m erechnung vorlage …` per UAC. Das Ergebnis legt der erhöhte Lauf selbst unter
+    `<Programmordner>\\ergebnisse\\<id>.json` an (dort nur Lesen für Benutzer); hier wird nur gelesen."""
+    eid = secrets.token_hex(8)
     try:
-        try:
-            code = erhoehen.als_admin(["-m", "erechnung", "vorlage", aktion, ziel, "--konfig", str(z.konfig),
-                                       f"--benutzer={os.environ.get('USERNAME', '')}", "--ergebnis", str(datei)])
-        except RuntimeError as e:
-            return json_antwort({"ok": False, "meldung": str(e)})
-        if code == -1:
-            return json_antwort({"ok": False, "meldung": "Administratorfreigabe abgebrochen"})
-        z.k.vorlagen = lade_alle_vorlagen(z.k.vorlagen_ordner)     # Probelauf sieht den neuen Stand
-        try:
-            e = json.loads(datei.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            e = None
-        if not isinstance(e, dict) or not isinstance(e.get("ok"), bool) or not isinstance(e.get("meldung"), str):
-            return json_antwort({"ok": False, "meldung": "kein Ergebnis vom Administrator-Aufruf"})
-        return json_antwort({"ok": e["ok"], "meldung": e["meldung"]})
-    finally:
-        shutil.rmtree(ordner, ignore_errors=True)
+        code = erhoehen.als_admin(["-m", "erechnung", "vorlage", aktion, ziel, "--konfig", str(z.konfig),
+                                   f"--benutzer={os.environ.get('USERNAME', '')}", "--ergebnis-id", eid])
+    except RuntimeError as e:
+        return json_antwort({"ok": False, "meldung": str(e)})
+    if code == -1:
+        return json_antwort({"ok": False, "meldung": "Administratorfreigabe abgebrochen"})
+    z.k.vorlagen = lade_alle_vorlagen(z.k.vorlagen_ordner)     # Probelauf sieht den neuen Stand
+    try:
+        e = json.loads(erhoehen.ergebnis_datei(z.konfig.parent, eid).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        e = None
+    if not isinstance(e, dict) or not isinstance(e.get("ok"), bool) or not isinstance(e.get("meldung"), str):
+        return json_antwort({"ok": False, "meldung": "kein Ergebnis vom Administrator-Aufruf"})
+    return json_antwort({"ok": e["ok"], "meldung": e["meldung"]})
 @route("POST", r"/api/entwurf/([^/]+)/aktivieren")
 def _aktivieren(h, z, name):
     o = entwurf_ordner(z, name)

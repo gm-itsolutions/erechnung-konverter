@@ -19,7 +19,7 @@ def main(argv=None, programm_konfig: Path | None = None) -> int:
     v.add_argument("ziel", help="Entwurfsordner (aktivieren) oder Vorlagenname")
     v.add_argument("--konfig", type=Path, required=True)
     v.add_argument("--benutzer", default="")
-    v.add_argument("--ergebnis", type=Path, required=True)
+    v.add_argument("--ergebnis-id", required=True, help="16 Hex-Zeichen; Datei <Programmordner>\\ergebnisse\\<id>.json")
     a = p.parse_args(argv)
     if a.version:
         import facturx, lxml, pdfplumber, yaml  # noqa: F401 – Probe: Paket vollständig?
@@ -51,10 +51,11 @@ def main(argv=None, programm_konfig: Path | None = None) -> int:
     print(text)
     return 0 if ok else 1
 def _vorlage(a, programm_konfig: Path | None) -> int:
-    """Erhöhter Lauf: konfig.json nur aus dem Programmordner, Ergebnis exklusiv in den frischen Ordner des Servers."""
+    """Erhöhter Lauf: konfig.json nur aus dem Programmordner, Ergebnis nur nach <Programmordner>\\ergebnisse\\."""
     from .anlernen import erhoehen
     try:
         konfig = erhoehen.pruefe_konfig(a.konfig, programm_konfig or erhoehen.programm_konfig())
+        erhoehen.ergebnis_datei(konfig.parent, a.ergebnis_id)    # ungültige ID: gar nichts tun
     except (ValueError, OSError) as e:      # kein Log: der Ordner wäre die Wahl des Benutzers
         print(e, file=sys.stderr)
         return 1
@@ -70,18 +71,19 @@ def _vorlage(a, programm_konfig: Path | None) -> int:
         h.close()
 def _vorlage_ausfuehren(a, konfig: Path, log) -> int:
     from .anlernen import erhoehen, verwalten
+    benutzer = erhoehen.benutzer_name(a.benutzer)   # stammt aus %USERNAME% des Benutzers: keine Zeilen ins Log schmuggeln
     try:
         if a.aktion == "aktivieren":
-            e = verwalten.aktivieren(erhoehen.pruefe_entwurf_pfad(Path(a.ziel)), konfig, a.benutzer)
+            e = verwalten.aktivieren(erhoehen.pruefe_entwurf_pfad(Path(a.ziel)), konfig, benutzer)
         else:
-            e = getattr(verwalten, a.aktion)(a.ziel, konfig, a.benutzer)
+            e = getattr(verwalten, a.aktion)(a.ziel, konfig, benutzer)
     except Exception as x:                  # immer ein Ergebnis für den Server, nie ein Traceback
         e = {"ok": False, "meldung": str(x) if isinstance(x, (ValueError, OSError)) else f"{type(x).__name__}: {x}"}
-    log.info("vorlage %s %s (Benutzer %s): %s", a.aktion, Path(a.ziel).name, a.benutzer, e["meldung"])
+    log.info("vorlage %s %r (Benutzer %r): %r", a.aktion, Path(a.ziel).name, benutzer, e["meldung"])
     try:
-        erhoehen.schreibe_ergebnis(a.ergebnis, e)
+        erhoehen.schreibe_ergebnis(konfig.parent, a.ergebnis_id, e)
     except (ValueError, OSError) as x:
-        log.error("Ergebnis nicht geschrieben (%s): %s", a.ergebnis, x)
+        log.error("Ergebnis %r nicht geschrieben: %s", a.ergebnis_id, x)
         return 1
     return 0 if e["ok"] else 1
 if __name__ == "__main__":
