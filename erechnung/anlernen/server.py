@@ -1,13 +1,22 @@
 """Lokale Anlern-Oberfläche, nur 127.0.0.1, Benutzerkontext (docs/lernmodus/spezifikation.md 3)."""
-import hmac, json, logging, os, re, secrets, socket, threading, time
+import hmac, json, logging, os, re, secrets, shutil, socket, threading, time
+from datetime import date
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
+import pypdfium2 as pdfium
+from ..bereiche import FELDER, BereichsFehler, Wort, _betrag, _datum, _feld, _nummer, _tage, feld_text, woerter_aus_pdf
+from ..modell import de
 from ..ueberwachen import lade_konfig
+from ..vorlagen import MIN_ZEICHEN, pdf_text
 log = logging.getLogger("erechnung.anlernen")
 STATISCH = Path(__file__).parent / "statisch"
 NAME, MUSTER = re.compile(r"[a-z0-9][a-z0-9-]{1,39}"), re.compile(r"m[0-9]{1,3}")
 GERAETE = {"con", "prn", "aux", "nul", *(f"{g}{i}" for g in ("com", "lpt") for i in range(1, 10))}   # Windows-Gerätenamen
+MAX_SEITEN, DATEINAME = 20, re.compile(r"[\w .-]{1,80}")
+LESER = {"nummer": _nummer, "nummer_kontrolle": _nummer, "datum": _datum, "leistungsdatum": _datum, "faellig": _datum,
+         "zahlungsziel_tage": _tage, "summe_netto": _betrag, "summe_ust": _betrag, "summe_brutto": _betrag, "nachlass": _betrag}
 MAX_PDF, MAX_JSON, LEERLAUF, TOKEN_FRIST = 10 * 1024 * 1024, 64 * 1024, 30 * 60, 60
 TYPEN = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".json": "application/json"}
@@ -129,6 +138,153 @@ def _entwurf_neu(h, z):
     (o / "vorlage.json").write_text(json.dumps({"name": name, "art": "bereiche", "format": 1, "felder": {}},
                                                ensure_ascii=False, indent=1), encoding="utf-8")
     return json_antwort({"name": name})
+def muster_pfad(z, name, m) -> Path:
+    if not MUSTER.fullmatch(m):
+        raise Fehler(400, "Muster-ID ungültig")
+    p = entwurf_ordner(z, name) / "muster" / f"{m}.pdf"
+    if not p.is_file():
+        raise Fehler(404, "Muster nicht gefunden")
+    return p
+def _muster_info(pdf: Path) -> dict:
+    return json.loads(pdf.with_suffix(".json").read_text(encoding="utf-8"))
+def seiten_von(z, name, m) -> list:
+    """Wörter je Seite (relativ 0..1); Text-PDF per pdfplumber, sonst erste OCR-Lesart; gecacht."""
+    pdf = muster_pfad(z, name, m)
+    cache = pdf.with_suffix(".woerter.json")
+    if cache.is_file():
+        return [[Wort(*w) for w in s] for s in json.loads(cache.read_text(encoding="utf-8"))]
+    if _muster_info(pdf)["text"]:
+        seiten = woerter_aus_pdf(pdf)
+    else:
+        if z.k.ocr is None:
+            raise Fehler(409, "Texterkennung nicht verfügbar")
+        g = iter(z.k.ocr(pdf))
+        try:
+            lesart = next(g, None)
+        finally:
+            getattr(g, "close", lambda: None)()
+        if lesart is None or len(lesart) < 3:
+            raise Fehler(409, "Texterkennung lieferte keine Wortlage")
+        seiten = lesart[2]
+    cache.write_text(json.dumps([[[w.text, *(round(x, 4) for x in w[1:])] for w in s] for s in seiten]), encoding="utf-8")
+    return seiten
+def _neues_muster(z, name, daten: bytes, dateiname: str):
+    if not daten.startswith(b"%PDF-"):
+        raise Fehler(400, "keine PDF-Datei")
+    ordner = entwurf_ordner(z, name) / "muster"
+    k = next((i for i in range(1, 1000) if not (ordner / f"m{i}.pdf").exists()), None)
+    if k is None:
+        raise Fehler(400, "zu viele Muster")
+    pdf = ordner / f"m{k}.pdf"
+    pdf.write_bytes(daten)
+    try:
+        d = pdfium.PdfDocument(pdf)
+        try:
+            seiten = len(d)
+        finally:
+            d.close()
+        if not 1 <= seiten <= MAX_SEITEN:
+            raise ValueError
+    except Exception:
+        pdf.unlink()
+        raise Fehler(400, f"PDF unlesbar oder mehr als {MAX_SEITEN} Seiten") from None
+    datei = unquote(dateiname)
+    datei = datei if DATEINAME.fullmatch(datei) else "muster.pdf"
+    n = len(re.findall(r"\w", pdf_text(pdf)))
+    info = {"datei": datei, "seiten": seiten, "text": n >= MIN_ZEICHEN}
+    pdf.with_suffix(".json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    return json_antwort({"id": f"m{k}", **{x: info[x] for x in ("seiten", "text")}})
+@route("GET", r"/api/entwurf/([^/]+)")
+def _entwurf_lesen(h, z, name):
+    o = entwurf_ordner(z, name)
+    muster = [{"id": p.stem, **_muster_info(p)} for p in sorted((o / "muster").glob("m*.pdf"), key=lambda p: int(p.stem[1:]))]
+    return json_antwort({"vorlage": json.loads((o / "vorlage.json").read_text(encoding="utf-8")), "muster": muster})
+@route("PUT", r"/api/entwurf/([^/]+)")
+def _entwurf_speichern(h, z, name):
+    o = entwurf_ordner(z, name)
+    v = lies_json(h)
+    if not isinstance(v.get("felder", {}), dict):
+        raise Fehler(400, "felder muss ein Objekt sein")
+    v = {**v, "name": name, "art": "bereiche", "format": 1}
+    (o / "vorlage.json").write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
+    return json_antwort({"ok": True})
+@route("DELETE", r"/api/entwurf/([^/]+)")
+def _entwurf_loeschen(h, z, name):
+    shutil.rmtree(entwurf_ordner(z, name))
+    return json_antwort({"ok": True})
+@route("POST", r"/api/entwurf/([^/]+)/muster")
+def _muster_hoch(h, z, name):
+    entwurf_ordner(z, name)
+    try:
+        n = int(h.headers.get("Content-Length", ""))
+    except ValueError:
+        raise Fehler(400, "Content-Length fehlt") from None
+    if n > MAX_PDF:
+        raise Fehler(413, "PDF zu groß")
+    return _neues_muster(z, name, h.rfile.read(n), h.headers.get("X-Dateiname", ""))
+@route("POST", r"/api/entwurf/([^/]+)/muster-aus-fehler")
+def _muster_aus_fehler(h, z, name):
+    datei = lies_json(h).get("datei")
+    if not isinstance(datei, str) or datei not in {p.name for p in z.k.fehler.glob("*.pdf") if p.is_file()}:
+        raise Fehler(400, "Datei steht nicht im Fehlerordner")
+    p = z.k.fehler / datei
+    if p.stat().st_size > MAX_PDF:
+        raise Fehler(413, "PDF zu groß")
+    return _neues_muster(z, name, p.read_bytes(), quote(datei))
+@route("DELETE", r"/api/entwurf/([^/]+)/muster/([^/]+)")
+def _muster_loeschen(h, z, name, m):
+    muster_pfad(z, name, m)
+    for p in (entwurf_ordner(z, name) / "muster").glob(f"{m}.*"):
+        p.unlink()
+    for p in (entwurf_ordner(z, name) / "muster").glob(f"{m}-*.png"):
+        p.unlink()
+    return json_antwort({"ok": True})
+@route("GET", r"/api/entwurf/([^/]+)/muster/([^/]+)/seite/([0-9]{1,3})\.png")
+def _seitenbild(h, z, name, m, s):
+    pdf, s = muster_pfad(z, name, m), int(s)
+    if not 1 <= s <= _muster_info(pdf)["seiten"]:
+        raise Fehler(404, "Seite nicht vorhanden")
+    png = pdf.with_name(f"{m}-{s}.png")
+    if not png.is_file():
+        d = pdfium.PdfDocument(pdf)
+        try:
+            seite = d[s - 1]
+            seite.render(scale=1400 / seite.get_width()).to_pil().save(png)
+        finally:
+            d.close()
+    return 200, "image/png", png.read_bytes()
+@route("GET", r"/api/entwurf/([^/]+)/muster/([^/]+)/woerter")
+def _woerter(h, z, name, m):
+    return json_antwort([[[w.text, *(round(x, 4) for x in w[1:])] for w in s] for s in seiten_von(z, name, m)])
+def _lesbar(feld: str, text: str) -> str:
+    if feld == "kaeufer":
+        return text
+    wert = LESER[feld](text)
+    return wert.strftime("%d.%m.%Y") if isinstance(wert, date) else de(wert) if isinstance(wert, Decimal) else str(wert)
+@route("POST", r"/api/entwurf/([^/]+)/vorschau")
+def _vorschau(h, z, name):
+    k = lies_json(h)
+    feld, felder = k.get("feld"), k.get("felder")
+    if feld not in FELDER or not isinstance(felder, dict) or feld not in felder:
+        raise Fehler(400, "feld/felder ungültig")
+    try:
+        for n, f in felder.items():
+            _feld(f, n)
+    except BereichsFehler as e:
+        raise Fehler(400, str(e)) from None
+    pdf = muster_pfad(z, name, k.get("muster") if isinstance(k.get("muster"), str) else "")
+    seiten, text = seiten_von(z, name, pdf.stem), _muster_info(pdf)["text"]
+    try:
+        r = feld_text(seiten, {"name": name, "felder": felder}, feld, ocr=not text)
+        if r is None:
+            return json_antwort({"zeilen": [], "wert": None, "fehler": "Anker nicht gefunden"})
+        zeilen = r[1]
+        if not " ".join(zeilen).strip():
+            return json_antwort({"zeilen": zeilen, "wert": None, "fehler": "Rahmen enthält keinen Text"})
+        return json_antwort({"zeilen": zeilen, "wert": _lesbar(feld, " / ".join(zeilen) if feld == "kaeufer" else " ".join(zeilen)),
+                             "fehler": None})
+    except ValueError as e:        # BereichsFehler ist ein ValueError
+        return json_antwort({"zeilen": [], "wert": None, "fehler": str(e)})
 @route("POST", r"/api/beenden")
 def _beenden(h, z):
     threading.Thread(target=h.server.shutdown, daemon=True).start()
