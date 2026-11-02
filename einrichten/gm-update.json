@@ -1,0 +1,12 @@
+{
+  "produkt": "erechnung-konverter",
+  "kanal": "stabil",
+  "art": "datei",
+  "basis_url": "https://git.gm-itsolutions.de",
+  "benutzer": null,
+  "probe": ["aktuell/python/python.exe", "-m", "erechnung", "--version"],
+  "stopp": ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Stop-ScheduledTask -TaskPath '\\GM-IT\\' -TaskName 'E-Rechnung'"],
+  "start": ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Start-ScheduledTask -TaskPath '\\GM-IT\\' -TaskName 'E-Rechnung'"],
+  "compose_ordner": null,
+  "health_sekunden": 60
+}
