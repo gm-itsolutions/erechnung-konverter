@@ -74,7 +74,7 @@ Danach die Token-Datei im Setup-Ordner löschen:
 Remove-Item .\token
 ```
 
-Eine Warnung „gm-update installieren endete mit …“ heißt meist: noch keine Freigabe. Die Einrichtung ist trotzdem fertig; die App kommt mit dem nächsten täglichen Lauf oder sofort mit `Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'Update erechnung-konverter'`.
+Eine Warnung „gm-update installieren endete mit …“ heißt meist: noch keine Freigabe. Die Einrichtung ist trotzdem fertig; die App kommt mit dem nächsten täglichen Lauf oder mit `Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'Update erechnung-konverter'`. Auch der Handstart wartet zufällig bis zu 60 Minuten (`--verzoegerung 60m` steht in der Aktion der Aufgabe, nicht im Auslöser). Sofort geht es als Administrator mit `& "$env:ProgramFiles\GM-IT\erechnung-konverter\gm-update.exe" lauf --konfig "$env:ProgramFiles\GM-IT\erechnung-konverter\gm-update.json"`.
 
 ### 3. Prüfen
 
@@ -86,7 +86,7 @@ Get-Printer -Name 'E-Rechnung' | Format-List Name, DriverName, PortName
 ```
 
 - `stand.json`: `version` gesetzt, `fehler` leer.
-- Testdruck: eine Rechnung aus dem Programm des Kunden auf **E-Rechnung** drucken. Nach wenigen Sekunden liegen `<Rechnungsnummer>.pdf` und `.xml` in `C:\E-Rechnung\E-Rechnungen`, das Original in `Originale`.
+- Testdruck: eine Rechnung aus dem Programm des Kunden auf **E-Rechnung** drucken, angemeldet als Benutzer. Nicht als SYSTEM (RMM-Shell, geplante Aufgabe als SYSTEM): Dann bleibt der Auftrag mit „Fehler – Wird gedruckt“ in der Warteschlange hängen, es entsteht keine Datei, der Drucker steht auf Fehler. Solche Aufträge mit `Get-PrintJob -PrinterName 'E-Rechnung' | Remove-PrintJob` löschen. Der Spooler schreibt die Datei im Kontext des druckenden Benutzers (Besitzer der Datei ist der Benutzer), deshalb brauchen Benutzer in `Eingang` das Recht Ändern. Nach wenigen Sekunden liegen `<Rechnungsnummer>.pdf` und `.xml` in `C:\E-Rechnung\E-Rechnungen`, das Original in `Originale`.
 - Log: `%ProgramFiles%\GM-IT\erechnung-konverter\erechnung.log` (je Datei Eingang, Vorlage, Ergebnis/Fehler), gm-update: `gm-update.log` daneben.
 
 ### 4. Neue Vorlage ohne Release
