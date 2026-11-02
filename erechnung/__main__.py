@@ -11,6 +11,8 @@ def main(argv=None) -> int:
     w = sub.add_parser("umwandeln")
     w.add_argument("pdf", type=Path)
     w.add_argument("--konfig", type=Path, required=True)
+    n = sub.add_parser("anlernen")
+    n.add_argument("--konfig", type=Path, required=True)
     a = p.parse_args(argv)
     if a.version:
         import facturx, lxml, pdfplumber, yaml  # noqa: F401 – Probe: Paket vollständig?
@@ -20,6 +22,15 @@ def main(argv=None) -> int:
     if not a.befehl:
         p.print_usage()
         return 2
+    if a.befehl == "anlernen":  # Benutzerkontext: kein Log im Programmordner (nur Admins schreiben dort)
+        import os
+        from .anlernen import server
+        daten = Path(os.environ["LOCALAPPDATA"]) / "GM-IT" / "erechnung-konverter" / "anlernen"
+        daten.mkdir(parents=True, exist_ok=True)
+        h = RotatingFileHandler(daten / "anlernen.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+        logging.basicConfig(level=logging.INFO, handlers=[h], format="%(asctime)s %(levelname)s %(message)s")
+        server.starte(a.konfig, daten)
+        return 0
     from .ueberwachen import lade_konfig, ueberwache, umwandeln
     h = RotatingFileHandler(a.konfig.parent / "erechnung.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     logging.basicConfig(level=logging.INFO, handlers=[h], format="%(asctime)s %(levelname)s %(message)s")
