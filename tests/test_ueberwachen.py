@@ -154,18 +154,18 @@ def test_frei(tmp_path):
 def test_ocr(k, caplog):
     """OCR-Vermerk neben das Original in Originale und ins Log, nicht in den Ausgabeordner."""
     caplog.set_level("INFO", logger="erechnung")
-    k.ocr = lambda pdf: TEXT
+    k.ocr = lambda pdf: [("psm 6", TEXT)]
     (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(TEXT.splitlines())))
     assert schritt(k) == 1
     assert namen(k.ausgabe) == ["RE9001.pdf"]
     orig = namen(k.originale)
     assert len(orig) == 2 and orig[0].endswith("-edge.ocr.txt") and orig[1].endswith("-edge.pdf")
     notiz = (k.originale / orig[0]).read_text(encoding="utf-8")
-    assert "per Texterkennung gelesen" in notiz and "Rechnung Nr. RE9001" in notiz and "RE9001" in notiz.splitlines()[0]
+    assert "per Texterkennung gelesen" in notiz and "Lesart psm 6" in notiz and "Rechnung Nr. RE9001" in notiz and "RE9001" in notiz.splitlines()[0]
     assert "Rechnung Nr. RE9001" in caplog.text
     get_xml_from_pdf((k.ausgabe / "RE9001.pdf").read_bytes(), check_xsd=True)
 def test_ocr_summenfehler(k):
-    k.ocr = lambda pdf: TEXT.replace("Brutto 238,00", "Brutto 239,00")
+    k.ocr = lambda pdf: [("psm 6", TEXT.replace("Brutto 238,00", "Brutto 239,00"))]
     (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(["x"])))
     schritt(k)
     grund = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 from . import mustang, ocr
 from .cii import bette_ein, erzeuge_cii
 from .modell import Partei, SummenFehler, summenabgleich
@@ -19,7 +19,7 @@ class Konfig:
     arbeit: Path
     verkaeufer: Partei
     vorlagen: list[dict]
-    ocr: Callable[[Path], str] | None = None   # Texterkennung für PDFs ohne Text
+    ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None   # Texterkennung für PDFs ohne Text: Lesarten (Name, Text)
     pruefe: Callable[[Path], str] | None = None   # Mustang (XML → Kurzbericht, ValueError wenn ungültig); None → Fehler
     xml_einzeln: bool = False                  # zusätzlich <Nummer>.xml in den Ausgabeordner (Behörden, XRechnung)
 def lade_konfig(datei: Path) -> Konfig:
@@ -78,14 +78,14 @@ def verarbeite(pdf: Path, k: Konfig) -> Path:
         tmp_pdf.unlink(missing_ok=True)
     orig = _frei(k.originale, pdf.stem, ".pdf", ".ocr.txt")
     if r.ocr_text:
-        vermerk = (f"{basis}: {OCR_HINWEIS} (Tesseract), das PDF enthielt keinen Text.\n"
+        vermerk = (f"{basis}: {OCR_HINWEIS} (Tesseract, Lesart {r.ocr_lesart}), das PDF enthielt keinen Text.\n"
                    "Beträge durch den Summenabgleich geprüft. Rechnungsnummer, Daten und Käufer gegen das PDF prüfen.\n\n"
                    f"--- erkannter Text ---\n{r.ocr_text}\n")
         with open(k.originale / f"{orig}.ocr.txt", "x", encoding="utf-8") as f:
             f.write(vermerk)
         log.info("%s: %s", pdf.name, vermerk)
     os.replace(pdf, k.originale / f"{orig}.pdf")
-    log.info("%s → %s (Vorlage %s%s)", pdf.name, basis, r.vorlage, f", {OCR_HINWEIS}" if r.ocr_text else "")
+    log.info("%s → %s (Vorlage %s%s)", pdf.name, basis, r.vorlage, f", {OCR_HINWEIS}, Lesart {r.ocr_lesart}" if r.ocr_text else "")
     return k.ausgabe / f"{basis}.pdf"
 def bearbeite(pdf: Path, k: Konfig) -> tuple[bool, str]:
     """Erfolg → (True, Pfad); jeder Fehler → Original + .fehler.txt nach Fehler, (False, Grund)."""

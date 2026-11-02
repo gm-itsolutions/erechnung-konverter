@@ -3,10 +3,10 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 import pdfplumber
 import yaml
-from .modell import Nachlass, Partei, Position, Rechnung, betrag, datum
+from .modell import Nachlass, Partei, Position, Rechnung, betrag, datum, summenabgleich
 STANDARD = Path(__file__).parent / "vorlagen"
 PFLICHT = ("nummer", "datum", "summe_netto", "summe_brutto")
 MIN_ZEICHEN = 20          # weniger Buchstaben/Ziffern im PDF → Bild → Texterkennung
@@ -115,8 +115,9 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         leistungsdatum=datum(opt("leistungsdatum")) if opt("leistungsdatum") else None,
         faellig=faellig, vorlage=v["name"], nachlaesse=nachlaesse)
 def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
-                  ocr: Callable[[Path], str] | None = None) -> Rechnung:
-    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden) und dieselbe Vorlagenlogik."""
+                  ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None) -> Rechnung:
+    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden, liefert Lesarten (Name, Text))
+    und dieselbe Vorlagenlogik."""
     text = pdf_text(pdf)
     if len(re.findall(r"\w", text)) >= MIN_ZEICHEN:
         v = finde_vorlage(text, vorlagen)
@@ -125,10 +126,34 @@ def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
         return rechnung_aus_text(text, v, verkaeufer)
     if ocr is None:
         raise VorlagenFehler("kein Text im PDF (als Bild gedruckt?), Texterkennung nicht verfügbar")
-    text = ocr(pdf)
+    # Lesarten der Texterkennung nacheinander; eine gilt nur mit Vorlage, Summenabgleich und, ab der zweiten,
+    # bestandener Gegenprobe der Rechnungsnummer (nummer_kontrolle). Sonst Grund der ersten Lesart
+    # und eine Zeile mit allen Lesarten (abweichende Gründe in Klammern).
+    erster, versucht = None, []
+    lesarten = iter(ocr(pdf))
     try:
-        r = rechnung_aus_text(text, finde_vorlage(text, vorlagen), verkaeufer)
-    except ValueError as e:
-        raise VorlagenFehler(f"{e} ({OCR_HINWEIS})") from None
-    r.ocr_text = text
-    return r
+        for name, text in lesarten:
+            versucht.append(name)
+            try:
+                v = finde_vorlage(text, vorlagen)
+                if len(versucht) > 1 and "nummer_kontrolle" not in v["felder"]:
+                    raise VorlagenFehler("ohne Gegenprobe der Rechnungsnummer (nummer_kontrolle) nicht verwendet")
+                r = rechnung_aus_text(text, v, verkaeufer)
+                summenabgleich(r)
+            except ValueError as e:
+                if erster and str(e) != str(erster):
+                    versucht[-1] = f"{name} ({e})"   # eigener Grund, wenn er von dem der ersten Lesart abweicht
+                erster = erster or e
+                continue
+            r.ocr_text, r.ocr_lesart = text, name
+            return r
+    except ValueError as e:   # Tesseract scheitert: in der ersten Lesart der Grund, danach Ende der Versuche
+        if not versucht:
+            raise
+        versucht.append(f"Abbruch: {e}")
+    finally:
+        getattr(lesarten, "close", lambda: None)()
+    if erster is None:
+        raise VorlagenFehler(f"Texterkennung ohne Ergebnis ({OCR_HINWEIS})")
+    zusatz = f" ({OCR_HINWEIS})\nVersuchte Lesarten: {', '.join(versucht)}" if len(versucht) > 1 else f" ({OCR_HINWEIS})"
+    raise type(erster)(f"{erster}{zusatz}") from None

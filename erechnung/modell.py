@@ -69,6 +69,7 @@ class Rechnung:
     waehrung: str = "EUR"
     vorlage: str = ""
     ocr_text: str = ""    # gesetzt, wenn per Texterkennung gelesen
+    ocr_lesart: str = ""  # welche Lesart der Texterkennung gegriffen hat (z. B. „psm 6 ohne Linien“)
     nachlaesse: list[Nachlass] = field(default_factory=list)
 class SummenFehler(ValueError):
     pass
