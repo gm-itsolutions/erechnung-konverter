@@ -31,3 +31,25 @@ def test_kennzahlen_bestaetigt_aber_falsch():
     k = kennzahlen([ok, falsch, skip])
     assert (k["gemessen"], k["uebersprungen"], k["vollstaendig_richtig"], k["bestaetigt"], k["bestaetigt_aber_falsch"]) == (2, 1, 1, 2, 1)
     assert k["felder"]["nummer"]["richtig"] == 1
+
+
+def test_none_im_gelesenen_stuerzt_nicht_ab():
+    from werkzeuge.korpus_messen import FELDER, _vergleiche
+    erg = {"status": "ok", "bestaetigt": True, "felder": {}, "gelesen": {**GELESEN, "positionen": [None, D("1")]}}
+    r = _vergleiche(erg, SOLL)
+    assert r["status"] == "fehler" and not r["bestaetigt"] and r["felder"] == {f: False for f in FELDER}
+    erg = {"status": "ok", "bestaetigt": False, "felder": {}, "gelesen": {**GELESEN, "datum": "02.01.2026"}}
+    assert _vergleiche(erg, SOLL)["status"] == "fehler"
+
+
+def test_gutschrift_vorzeichen_und_kern():
+    from werkzeuge.korpus_messen import kennzahlen
+    soll = {**SOLL, "netto": "-100.00", "brutto": "-119.00", "steuern": {"19": "-19.00"},
+            "positionen": [{"netto": "-100.00"}]}
+    neg = {**GELESEN, "netto": D("-100"), "brutto": D("-119"), "steuern": {D("19"): D("-19")}, "positionen": [D("-100")]}
+    assert all(v is True for v in vergleiche(soll, neg).values())
+    assert vergleiche(soll, {**neg, "netto": D("100")})["netto"] is False
+    x = {"status": "ok", "bestaetigt": True, "felder": vergleiche(soll, {**neg, "netto": D("100")})}
+    y = {"status": "ok", "bestaetigt": True, "felder": vergleiche(soll, {**neg, "kaeufer": "X"})}
+    k = kennzahlen([x, y])
+    assert (k["bestaetigt_aber_falsch"], k["bestaetigt_kern_falsch"]) == (2, 1)

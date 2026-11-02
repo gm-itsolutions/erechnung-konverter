@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # erechnung auch beim Start als Skript
 FELDER = ("nummer", "datum", "netto", "ust", "brutto", "kaeufer", "pos_anzahl", "pos_netto")
+KERN = ("nummer", "datum", "netto", "brutto")
 TESTDATEN = Path("/root/erechnung-testdaten")
 
 
@@ -68,11 +69,13 @@ def generisch_verfuegbar() -> bool:
     try:
         from erechnung import generisch  # noqa: F401
         return True
-    except ImportError:
-        return False
+    except ModuleNotFoundError as e:
+        if e.name == "erechnung.generisch":
+            return False
+        raise
 
 
-def _ocr(mit_ocr: bool):
+def _ocr(mit_ocr: bool, arbeit: Path):
     """(Lesarten-Funktion | None). Tessdata aus den Testdaten, wenn vorhanden."""
     from erechnung import ocr
     aufruf = ocr.tesseract() if mit_ocr else None
@@ -80,12 +83,11 @@ def _ocr(mit_ocr: bool):
         return None
     if (TESTDATEN / "tessdata" / "deu.traineddata").exists():
         os.environ["TESSDATA_PREFIX"] = str(TESTDATEN / "tessdata")
-    return partial(ocr.erkenne, arbeit=Path(tempfile.mkdtemp(prefix="messen-")), aufruf=aufruf)
+    return partial(ocr.erkenne, arbeit=arbeit, aufruf=aufruf)
 
 
 def messe(sollpfad: str, verfahren: str, mit_ocr: bool) -> dict:
     """Eine Rechnung messen. status: ok | fehler | uebersprungen."""
-    from erechnung import modell, vorlagen
     from erechnung.modell import Partei
     VERKAEUFER = Partei("GM IT Solutions", "Musterstraße 1", "16928", "Pritzwalk")
     sollpfad = Path(sollpfad)
@@ -93,16 +95,22 @@ def messe(sollpfad: str, verfahren: str, mit_ocr: bool) -> dict:
     pdf = sollpfad.with_name(soll["datei"])
     erg = dict(datei=pdf.name, ordner=pdf.parent.name, layout=soll.get("layout", "korpus"), status="ok", meldung="",
                bestaetigt=False, bild=bool(soll.get("bild_pdf")), felder={})
-    gelesen = None
+    with tempfile.TemporaryDirectory(prefix="messen-") as arbeit:
+        _lies(erg, verfahren, mit_ocr, arbeit, pdf, VERKAEUFER)
+    return _vergleiche(erg, soll)
+
+
+def _lies(erg, verfahren, mit_ocr, arbeit, pdf, VERKAEUFER):
+    from erechnung import modell, vorlagen
     try:
         if verfahren == "vorlage":
-            ocr = _ocr(mit_ocr)
+            ocr = _ocr(mit_ocr, Path(arbeit))
             if erg["bild"] and ocr is None:
                 erg["status"] = "uebersprungen"
                 erg["meldung"] = "Bild-PDF, keine Texterkennung"
             else:
                 r = vorlagen.lies_rechnung(pdf, vorlagen.lade_vorlagen(vorlagen.STANDARD), VERKAEUFER, ocr)
-                gelesen = _aus_rechnung(r)
+                erg["gelesen"] = _aus_rechnung(r)
                 try:
                     modell.summenabgleich(r)
                     erg["bestaetigt"] = True
@@ -110,19 +118,28 @@ def messe(sollpfad: str, verfahren: str, mit_ocr: bool) -> dict:
                     erg["meldung"] = f"Summenabgleich: {e}"
         else:
             from erechnung import generisch
-            ocr = _ocr(mit_ocr)
+            ocr = _ocr(mit_ocr, Path(arbeit))
             if erg["bild"] and ocr is None:
                 erg["status"] = "uebersprungen"
                 erg["meldung"] = "Bild-PDF, keine Texterkennung"
             else:
                 v = generisch.vorschlag_aus_pdf(pdf, ocr)
-                gelesen = _aus_vorschlag(v)
+                erg["gelesen"] = _aus_vorschlag(v)
                 erg["bestaetigt"] = bool(v.bestaetigt)
                 erg["meldung"] = v.grund or ""
     except Exception as e:  # jede Rechnung einzeln; ein Fehler gilt als „nichts gelesen“
         erg["status"], erg["meldung"] = "fehler", f"{type(e).__name__}: {e}"[:300]
+
+
+def _vergleiche(erg: dict, soll: dict) -> dict:
+    gelesen = erg.pop("gelesen", None)
     if erg["status"] != "uebersprungen":
-        erg["felder"] = vergleiche(soll, gelesen)
+        try:
+            erg["felder"] = vergleiche(soll, gelesen)
+        except Exception as e:  # z. B. None in Positionen: gilt als „nichts richtig gelesen“
+            erg["status"], erg["bestaetigt"] = "fehler", False
+            erg["meldung"] = f"Vergleich: {type(e).__name__}: {e}"[:300]
+            erg["felder"] = {f: False for f in FELDER}
     return erg
 
 
@@ -158,9 +175,11 @@ def kennzahlen(ergebnisse: list[dict]) -> dict:
         bew = [x["felder"][f] for x in e if x["felder"][f] is not None]
         felder[f] = dict(richtig=sum(bew), bewertbar=len(bew), nicht_bewertbar=len(e) - len(bew))
     ok = lambda x: all(v is not False for v in x["felder"].values())
+    kern = lambda x: all(x["felder"][f] is not False for f in KERN)
     return dict(anzahl=len(ergebnisse), uebersprungen=len(ergebnisse) - len(e), gemessen=len(e), felder=felder,
                 vollstaendig_richtig=sum(ok(x) for x in e), bestaetigt=sum(x["bestaetigt"] for x in e),
-                bestaetigt_aber_falsch=sum(x["bestaetigt"] and not ok(x) for x in e))
+                bestaetigt_aber_falsch=sum(x["bestaetigt"] and not ok(x) for x in e),
+                bestaetigt_kern_falsch=sum(x["bestaetigt"] and not kern(x) for x in e))
 
 
 def tabelle(k: dict) -> str:
@@ -171,7 +190,8 @@ def tabelle(k: dict) -> str:
     z.append("")
     z.append(f"gemessen {k['gemessen']} von {k['anzahl']} (übersprungen {k['uebersprungen']}); "
              f"vollständig richtig {k['vollstaendig_richtig']}; bestätigt {k['bestaetigt']}; "
-             f"**bestätigt, aber falsch: {k['bestaetigt_aber_falsch']}**")
+             f"**bestätigt, aber falsch: {k['bestaetigt_aber_falsch']}**; "
+             f"**bestätigt, Kern falsch (Nummer/Datum/Netto/Brutto): {k['bestaetigt_kern_falsch']}**")
     return "\n".join(z)
 
 
@@ -204,9 +224,9 @@ def main(argv=None) -> int:
         print(f"== Verfahren {v}: {len(pdfs)} Rechnungen ==")
         for o, k in bericht[v]["je_ordner"].items():
             print(f"\n-- {o}\n{tabelle(k)}")
-        print("\n-- je Layout: gemessen / vollständig richtig / bestätigt / bestätigt, aber falsch")
+        print("\n-- je Layout: gemessen / vollständig richtig / bestätigt / bestätigt, aber falsch / Kern falsch")
         for l, k in bericht[v]["je_layout"].items():
-            print(f"{l:8} {k['gemessen']:4} {k['vollstaendig_richtig']:4} {k['bestaetigt']:4} {k['bestaetigt_aber_falsch']:4}")
+            print(f"{l:8} {k['gemessen']:4} {k['vollstaendig_richtig']:4} {k['bestaetigt']:4} {k['bestaetigt_aber_falsch']:4} {k['bestaetigt_kern_falsch']:4}")
     if a.lexware:
         bericht["lexware"] = lexware_pruefung()
         for x in bericht["lexware"]:
