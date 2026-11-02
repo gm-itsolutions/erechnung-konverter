@@ -67,7 +67,7 @@ def test_stand(lauf):
     anfrage(s, "POST", "/api/entwurf", json.dumps({"name": "werkstatt"}).encode(), schreibe)
     st, _, b = anfrage(s, "GET", "/api/stand", kopf=lese)
     assert st == 200 and json.loads(b) == {"entwuerfe": ["werkstatt"], "fehlerordner": ["a.pdf", "b.pdf"],
-                                           "aktiv": [], "deaktiviert": [], "mitgeliefert": []}
+                                           "aktiv": [], "deaktiviert": [], "mitgeliefert": ["lexware-gm-it"]}   # Listen: Task 10
 def test_sicherheitskoepfe(lauf):
     s, url, _ = lauf
     lese, _ = anmelden(s, url)

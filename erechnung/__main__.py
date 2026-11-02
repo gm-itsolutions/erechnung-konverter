@@ -2,7 +2,8 @@ import argparse, logging, sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from . import __version__
-def main(argv=None) -> int:
+def main(argv=None, programm_konfig: Path | None = None) -> int:
+    """`programm_konfig` ersetzt in Tests die konfig.json des Programmordners (Befehl `vorlage`)."""
     p = argparse.ArgumentParser(prog="erechnung")
     p.add_argument("--version", action="store_true", help="Version ausgeben (lädt alle Abhängigkeiten, Probe für gm-update)")
     sub = p.add_subparsers(dest="befehl")
@@ -13,6 +14,12 @@ def main(argv=None) -> int:
     w.add_argument("--konfig", type=Path, required=True)
     n = sub.add_parser("anlernen")
     n.add_argument("--konfig", type=Path, required=True)
+    v = sub.add_parser("vorlage")       # erhöht per UAC, aufgerufen von der Anlern-Oberfläche
+    v.add_argument("aktion", choices=("aktivieren", "deaktivieren", "reaktivieren", "loeschen"))
+    v.add_argument("ziel", help="Entwurfsordner (aktivieren) oder Vorlagenname")
+    v.add_argument("--konfig", type=Path, required=True)
+    v.add_argument("--benutzer", default="")
+    v.add_argument("--ergebnis", type=Path, required=True)
     a = p.parse_args(argv)
     if a.version:
         import facturx, lxml, pdfplumber, yaml  # noqa: F401 – Probe: Paket vollständig?
@@ -31,6 +38,8 @@ def main(argv=None) -> int:
         logging.basicConfig(level=logging.INFO, handlers=[h], format="%(asctime)s %(levelname)s %(message)s")
         server.starte(a.konfig, daten)
         return 0
+    if a.befehl == "vorlage":
+        return _vorlage(a, programm_konfig)
     from .ueberwachen import lade_konfig, ueberwache, umwandeln
     h = RotatingFileHandler(a.konfig.parent / "erechnung.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     logging.basicConfig(level=logging.INFO, handlers=[h], format="%(asctime)s %(levelname)s %(message)s")
@@ -41,5 +50,39 @@ def main(argv=None) -> int:
     ok, text = umwandeln(a.pdf, k)
     print(text)
     return 0 if ok else 1
+def _vorlage(a, programm_konfig: Path | None) -> int:
+    """Erhöhter Lauf: konfig.json nur aus dem Programmordner, Ergebnis exklusiv in den frischen Ordner des Servers."""
+    from .anlernen import erhoehen
+    try:
+        konfig = erhoehen.pruefe_konfig(a.konfig, programm_konfig or erhoehen.programm_konfig())
+    except (ValueError, OSError) as e:      # kein Log: der Ordner wäre die Wahl des Benutzers
+        print(e, file=sys.stderr)
+        return 1
+    h = RotatingFileHandler(konfig.parent / "erechnung.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log = logging.getLogger("erechnung.vorlage")
+    log.addHandler(h)
+    log.setLevel(logging.INFO)
+    try:
+        return _vorlage_ausfuehren(a, konfig, log)
+    finally:
+        log.removeHandler(h)
+        h.close()
+def _vorlage_ausfuehren(a, konfig: Path, log) -> int:
+    from .anlernen import erhoehen, verwalten
+    try:
+        if a.aktion == "aktivieren":
+            e = verwalten.aktivieren(erhoehen.pruefe_entwurf_pfad(Path(a.ziel)), konfig, a.benutzer)
+        else:
+            e = getattr(verwalten, a.aktion)(a.ziel, konfig, a.benutzer)
+    except Exception as x:                  # immer ein Ergebnis für den Server, nie ein Traceback
+        e = {"ok": False, "meldung": str(x) if isinstance(x, (ValueError, OSError)) else f"{type(x).__name__}: {x}"}
+    log.info("vorlage %s %s (Benutzer %s): %s", a.aktion, Path(a.ziel).name, a.benutzer, e["meldung"])
+    try:
+        erhoehen.schreibe_ergebnis(a.ergebnis, e)
+    except (ValueError, OSError) as x:
+        log.error("Ergebnis nicht geschrieben (%s): %s", a.ergebnis, x)
+        return 1
+    return 0 if e["ok"] else 1
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,5 +1,5 @@
 """Lokale Anlern-Oberfläche, nur 127.0.0.1, Benutzerkontext (docs/lernmodus/spezifikation.md 3)."""
-import hmac, json, logging, os, re, secrets, shutil, socket, threading, time
+import hmac, json, logging, os, re, secrets, shutil, socket, tempfile, threading, time
 from datetime import date
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,12 +8,14 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import pypdfium2 as pdfium
 from ..bereiche import FELDER, GERAETE, MAX_PDF, MUSTER, NAME, BereichsFehler, Wort, _betrag, _datum, _feld, _nummer, _tage, feld_text, woerter_aus_pdf
 from ..modell import de
-from ..ueberwachen import lade_konfig
+from ..ueberwachen import ANGELERNT, lade_alle_vorlagen, lade_konfig
 from ..vorlagen import MIN_ZEICHEN, pdf_text
+from . import erhoehen, verwalten     # erhoehen über das Modul: im Test ersetzbar
 log = logging.getLogger("erechnung.anlernen")
 STATISCH = Path(__file__).parent / "statisch"
 MAX_HOEHE = 6000    # Pixel; 1400 breit, A4 = 1980
 MAX_SEITEN, DATEINAME = 20, re.compile(r"[\w .-]{1,80}")
+STEMPEL = re.compile(r"-[0-9]{8}-[0-9]{6}")   # ersetzte Altstände in deaktiviert/ (verwalten._stempel)
 LESER = {"nummer": _nummer, "nummer_kontrolle": _nummer, "datum": _datum, "leistungsdatum": _datum, "faellig": _datum,
          "zahlungsziel_tage": _tage, "summe_netto": _betrag, "summe_ust": _betrag, "summe_brutto": _betrag, "nachlass": _betrag}
 MAX_JSON, LEERLAUF, TOKEN_FRIST = 64 * 1024, 30 * 60, 60
@@ -122,9 +124,13 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_DELETE = _bearbeiten
 @route("GET", r"/api/stand")
 def _stand(h, z):
+    angelernt = z.konfig.parent / "vorlagen" / ANGELERNT
+    def namen(ordner):
+        return sorted(p.stem for p in ordner.glob("*.yml") if p.is_file() and NAME.fullmatch(p.stem) and not STEMPEL.search(p.stem))
     return json_antwort({"entwuerfe": sorted(p.name for p in (z.daten / "entwuerfe").iterdir() if p.is_dir()),
                          "fehlerordner": sorted(p.name for p in z.k.fehler.glob("*.pdf") if p.is_file()),
-                         "aktiv": [], "deaktiviert": [], "mitgeliefert": []})       # Vorlagenlisten: Task 10
+                         "aktiv": namen(angelernt), "deaktiviert": namen(angelernt / "deaktiviert"),
+                         "mitgeliefert": sorted(verwalten._mitgeliefert(z.k))})
 @route("POST", r"/api/entwurf")
 def _entwurf_neu(h, z):
     name = _name(lies_json(h).get("name"))
@@ -301,6 +307,52 @@ def _vorschau(h, z, name):
                              "fehler": None})
     except ValueError as e:        # BereichsFehler ist ein ValueError
         return json_antwort({"zeilen": [], "wert": None, "fehler": str(e)})
+@route("POST", r"/api/entwurf/([^/]+)/probelauf")
+def _probelauf(h, z, name):
+    return json_antwort(verwalten.probelauf(entwurf_ordner(z, name), z.k))
+def _als_admin(z, aktion: str, ziel: str):
+    """`python.exe -m erechnung vorlage …` per UAC; Ergebnis in einen frischen Ordner, den nur dieser Aufruf kennt."""
+    ordner = Path(tempfile.mkdtemp(prefix="ergebnis-", dir=z.daten / "arbeit"))
+    datei = ordner / "ergebnis.json"
+    try:
+        try:
+            code = erhoehen.als_admin(["-m", "erechnung", "vorlage", aktion, ziel, "--konfig", str(z.konfig),
+                                       f"--benutzer={os.environ.get('USERNAME', '')}", "--ergebnis", str(datei)])
+        except RuntimeError as e:
+            return json_antwort({"ok": False, "meldung": str(e)})
+        if code == -1:
+            return json_antwort({"ok": False, "meldung": "Administratorfreigabe abgebrochen"})
+        z.k.vorlagen = lade_alle_vorlagen(z.k.vorlagen_ordner)     # Probelauf sieht den neuen Stand
+        try:
+            e = json.loads(datei.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            e = None
+        if not isinstance(e, dict) or not isinstance(e.get("ok"), bool) or not isinstance(e.get("meldung"), str):
+            return json_antwort({"ok": False, "meldung": "kein Ergebnis vom Administrator-Aufruf"})
+        return json_antwort({"ok": e["ok"], "meldung": e["meldung"]})
+    finally:
+        shutil.rmtree(ordner, ignore_errors=True)
+@route("POST", r"/api/entwurf/([^/]+)/aktivieren")
+def _aktivieren(h, z, name):
+    o = entwurf_ordner(z, name)
+    b = lies_json(h).get("bestaetigt")
+    if not isinstance(b, list) or not all(isinstance(x, str) for x in b) or not {p.stem for p in verwalten._muster(o)} <= set(b):
+        raise Fehler(400, "Bitte jedes Muster bestätigen")
+    return _als_admin(z, "aktivieren", str(o.absolute()))
+@route("POST", r"/api/vorlage/([^/]+)/(deaktivieren|reaktivieren|loeschen)")
+def _vorlage_verwalten(h, z, name, aktion):
+    return _als_admin(z, aktion, _name(name))
+@route("GET", r"/api/entwurf/([^/]+)/export")
+def _export(h, z, name):
+    """Nur vorlage.yml (F2), über einen Wegwerf-Ordner; keine Muster-PDFs."""
+    o = entwurf_ordner(z, name)
+    with tempfile.TemporaryDirectory(prefix="export-", dir=z.daten / "arbeit") as t:
+        try:
+            datei = verwalten.exportieren(o, Path(t))
+        except (ValueError, OSError) as e:      # BereichsFehler, kaputtes JSON, vorlage.json fehlt
+            raise Fehler(400, f"Export nicht möglich: {e}") from None
+        daten = datei.read_bytes()
+    return 200, "application/yaml; charset=utf-8", daten, (("Content-Disposition", f'attachment; filename="{datei.name}"'),)
 @route("POST", r"/api/beenden")
 def _beenden(h, z):
     threading.Thread(target=h.server.shutdown, daemon=True).start()
