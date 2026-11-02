@@ -60,6 +60,8 @@ def daten(zeile: str) -> list[tuple[date, int, int]]:
             elif g["ij"]:
                 d = date(int(g["ij"]), int(g["im"]), int(g["it"]))
             elif g["st"]:
+                if int(g["st"]) <= 12 and int(g["sm"]) <= 12 and g["st"] != g["sm"]:
+                    continue    # 11/03/2017: Tag/Monat oder Monat/Tag (US) – nicht raten
                 d = date(int(g["sj"]), int(g["sm"]), int(g["st"]))
             elif g["nt"]:
                 d = date(int(g["nj"]), MONATE[g["nm"].lower()], int(g["nt"]))
@@ -135,16 +137,18 @@ NUMMER_LABEL = _re(
     r"[-\s]?(?:nr|nummer|no|number|n°|#)\b\.?",
     r"\b(?:rechnung|gutschrift|invoice|beleg)\s+(?:nr|no|n°)\b\.?", r"\b(?:re|rg)[-.\s]?nr\b\.?",
     r"\bfacture\s+n[°o]\.?", r"\bn°\s+(?:de\s+)?facture\b")
-NUMMER_KOPF = re.compile(
-    r"^\s*(?:handels)?(?:rechnung|invoice|gutschrift|facture|avoir|rechnungskorrektur|stornorechnung)\b"
-    r"(?P<nr>\s+(?:nr|no|n°)\b\.?)?[\s:#]*(?P<w>\S+)", re.I)
+NUMMER_KOPF = re.compile(   # Überschrift: „Rechnung RE-1“, „Handelsrechnung (380) Nr. 471102“, „Rechnung des Versicherers Nr. 1“
+    r"^\s*[\w-]*(?:rechnung|invoice|gutschrift|facture|avoir|credit\s?note)[\w-]*"
+    r"(?:(?:\s*(?:\([^)]*\)|\s[^\W\d]+)){0,4}?(?P<nr>\s*\b(?:nr|no|n°)\b\.?))?[\s:#]*(?P<w>\S+)", re.I)
 NICHT_NUMMER = _re(r"kunden", r"auftrag", r"bestell", r"order", r"liefer", r"steuer", r"ust", r"vat\b", r"kundennr",
                    r"zu\s+rechnung", r"bezug", r"angebot")
+DATUM_STARK = _re(r"(?:rechnungs|beleg|ausstellungs|invoice\s?|issue\s?)[-\s]?(?:datum|date)", r"issued(?:\s+(?:at|on))?",
+                  r"date\s+(?:de\s+)?(?:la\s+)?facture", r"date\s+of\s+(?:invoice|issue)")
 DATUM_LABEL = _re(r"\b(?:rechnungs|beleg|ausstellungs|invoice\s?|issue\s?)[-\s]?(?:datum|date)\b",
                   r"\bdate\s+(?:de\s+)?(?:la\s+)?facture\b", r"\bdate\s+of\s+(?:invoice|issue)\b",
-                  r"(?<![\w-])datum\b", r"(?<![\w-])date\b")
+                  r"(?<![\w-])datum\b", r"(?<![\w-])date\b", r"\bissued(?:\s+(?:at|on))?")
 DATUM_NICHT = _re(r"liefer", r"leistung", r"fällig", r"faellig", r"due", r"delivery", r"supply", r"order",
-                  r"bestell", r"auftrag", r"zahl", r"échéance", r"echeance", r"geburt", r"service")
+                  r"bestell", r"auftrag", r"zahl", r"règlement", r"reglement", r"payment", r"paiement", r"échéance", r"echeance", r"geburt", r"service")
 LEISTUNG_LABEL = _re(r"leistungsdatum", r"lieferdatum", r"liefer-\s*und\s*leistungsdatum", r"leistungszeitraum",
                      r"leistungszeit", r"delivery\s+date", r"date\s+of\s+(?:supply|delivery|service)",
                      r"(?<![\w-])leistung\b", r"date\s+de\s+livraison")
@@ -185,11 +189,13 @@ EINHEITEN = {"std": "HUR", "std.": "HUR", "stunde": "HUR", "stunden": "HUR", "h"
 # ---------------------------------------------------------------- Kopffelder
 def _token(rest: str) -> tuple[str, int] | None:
     """Erstes Wort nach einer Beschriftung (Trenner : # . übersprungen) → (Wert, Versatz) oder None."""
-    m = re.match(r"[\s:#.]*(?:(?:nr|no|n°)\b\.?[\s:#]*)?([A-Za-z0-9][\w\-/.]*)", rest, re.I)
+    m = re.match(r"[\s:#.]*(?:(?:nr|no|n°)\b\.?[\s:#]*)?([A-Za-z0-9][\w\-/.,]*)", rest, re.I)
     if not m:
         return None
     w = m.group(1).rstrip(".,-/")
-    if not re.search(r"\d", w) or len(w) > 30 or daten(w) or re.fullmatch(r"-?\d+[.,]\d{2}", w):
+    if re.match(r" \d", rest[m.end(1):]) or len(w) < 2:   # zerrissener Text („4 71102“): nicht raten
+        return None
+    if not re.search(r"\d", w) or len(w) > 30 or daten(w) or re.fullmatch(r"-?[\d.,]*[.,]\d{2}", w):
         return None
     return w, m.start(1)
 
@@ -236,9 +242,12 @@ def _nummer(zeilen: list[str]) -> tuple[str | None, str, bool]:
     return top[0], fund[top[0]], len(top) == 1
 
 
-def _datumsfeld(zeilen: list[str], label: re.Pattern, nicht: re.Pattern | None = None,
-                vom: bool = False, brief: bool = False) -> tuple[date | None, str, bool]:
-    """(Datum, Fundstelle, eindeutig): Datum direkt nach der Beschriftung (bis 25 Zeichen) oder darunter."""
+def _datumsfeld(zeilen: list[str], label: re.Pattern, nicht: re.Pattern | None = None, stark: re.Pattern | None = None,
+                nummer_zeile: str = "", brief: bool = False) -> tuple[date | None, str, bool]:
+    """(Datum, Fundstelle, eindeutig). Je 3 Punkte: Datum direkt nach der Beschriftung (bis 25 Zeichen) oder darunter,
+    Datum hinter der Rechnungsnummer („Rechnung Nr. 1 vom …“). Je 1 Punkt: „vom …“, Briefdatum „Ort, den …“.
+    `nicht` (z. B. „Liefer-“ vor „Datum“) und Fußzeilen gelten nicht für `stark` (z. B. „Rechnungsdatum“).
+    „vom …“ und Briefdatum nur mit `brief` (Rechnungsdatum)."""
     punkte: dict[date, int] = {}
     fund: dict[date, str] = {}
 
@@ -247,7 +256,8 @@ def _datumsfeld(zeilen: list[str], label: re.Pattern, nicht: re.Pattern | None =
         fund.setdefault(d, z.strip())
     for i, z in enumerate(zeilen):
         for m in label.finditer(z):
-            if nicht and nicht.search(z[max(0, m.start() - 20):m.end() + 2]):
+            if not (stark and stark.fullmatch(m.group())) and (
+                    nicht and nicht.search(z[max(0, m.start() - 20):m.end() + 2]) or FUSS.search(z)):
                 continue
             rest = z[m.end():]
             d = daten(rest)
@@ -257,15 +267,22 @@ def _datumsfeld(zeilen: list[str], label: re.Pattern, nicht: re.Pattern | None =
                 d = _darunter(zeilen, i, m.start(), m.end(), lambda s: (daten(s) or [(None,)])[0][0])
                 if d:
                     neu(d, z, 3)
-        if vom:
-            for m in re.finditer(r"\bvom\s+", z, re.I):
-                d = daten(z[m.end():])
-                if d and d[0][1] == 0 and not NICHT_NUMMER.search(z[:m.start()]):
-                    neu(d[0][0], z, 1)
-        if brief and (m := re.match(r"^\s*[A-ZÄÖÜ][\w .\-]+,\s*(?:den\s+)?(.+?)\s*$", z)):
-            d = daten(m.group(1))
-            if d and d[0][1] == 0 and d[0][2] == len(m.group(1)):
+        if nummer_zeile and z.strip() == nummer_zeile:
+            if d := [x for x in daten(z) if re.search(r"(?i)\b(?:vom|von|from|du|dated)\s*$|\S\s{2,}$|\d\s+$",
+                                                       z[:x[1]])]:
+                neu(d[0][0], z, 3)
+            elif re.search(r"(?i)\b(?:vom|von|dated)\s*$", z) and i + 1 < len(zeilen) and \
+                    (d := daten(zeilen[i + 1])) and not zeilen[i + 1][:d[0][1]].strip():
+                neu(d[0][0], z, 3)      # „Rechnung Nr. 1 vom“ + Datum in der nächsten Zeile
+        for m in re.finditer(r"\bvom\s+", z, re.I) if brief else ():
+            d = daten(z[m.end():])
+            if d and d[0][1] == 0 and not re.search(r"(?i)version|stand|gültig|bis|\bzu\b|bezug|bestell|auftrag|"
+                                                   r"liefer|angebot|order", z[:m.start()]) \
+                    and not re.match(r"\s*bis\b", z[m.end() + d[0][2]:]):
                 neu(d[0][0], z, 1)
+        if brief and (m := re.search(r"(?:^|\s{2,})[A-ZÄÖÜ][\w.\-]+(?: [\w.\-]+)*,\s+(?:den\s+)?(\S.*?)\s*$", z)) \
+                and (d := daten(m.group(1))) and d[0][1] == 0 and d[0][2] == len(m.group(1)):
+            neu(d[0][0], z, 1)          # Briefdatum „Ort, den 2. November 2026“
     if not punkte:
         return None, "", False
     best = max(punkte.values())
@@ -479,7 +496,8 @@ def erkenne(text: str) -> Vorschlag:
     v = Vorschlag()
     eindeutig = {}
     v.nummer, v.fundstellen["nummer"], eindeutig["nummer"] = _nummer(zeilen)
-    v.datum, v.fundstellen["datum"], eindeutig["datum"] = _datumsfeld(zeilen, DATUM_LABEL, DATUM_NICHT, vom=True, brief=True)
+    v.datum, v.fundstellen["datum"], eindeutig["datum"] = _datumsfeld(
+        zeilen, DATUM_LABEL, DATUM_NICHT, DATUM_STARK, v.fundstellen["nummer"], brief=True)
     v.leistungsdatum, v.fundstellen["leistungsdatum"], _ = _datumsfeld(zeilen, LEISTUNG_LABEL)
     v.faellig, v.fundstellen["faellig"], _ = _datumsfeld(zeilen, FAELLIG_LABEL)
     v.kaeufer, v.fundstellen["kaeufer"] = _kaeufer(text.splitlines())
