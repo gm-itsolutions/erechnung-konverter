@@ -43,3 +43,13 @@ def test_leere_seitenliste():
 def test_betrag_ohne_zahl():
     with pytest.raises(ValueError):
         _betrag("n/a")
+def test_steuern_folgeseite_ohne_steuerzeile(tmp_path):
+    s = seiten_aus(tmp_path, werkstatt_pdf(MUSTER1, SUMMEN1))
+    spur = {}
+    k = kopf_aus_bereichen([*s, []], V, spur=spur)
+    assert k["steuern"] == {D("19"): D("45.60")} and spur["steuern1"]["seite"] == 0
+def test_kaeufer_fehlt(tmp_path):
+    v = yaml.safe_load(yaml.safe_dump(V))
+    del v["felder"]["kaeufer"]
+    with pytest.raises(BereichsFehler, match="kaeufer"):
+        kopf_aus_bereichen(seiten_aus(tmp_path, werkstatt_pdf(MUSTER1, SUMMEN1)), v)

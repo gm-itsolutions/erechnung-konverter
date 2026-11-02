@@ -225,7 +225,10 @@ def kopf_aus_bereichen(seiten, v, ocr=False, spur=None) -> dict:
     tage = w("zahlungsziel_tage", _tage)
     if k["faellig"] is None and tage:
         k["faellig"] = k["datum"] + timedelta(days=tage)
-    _, z = feld_text(seiten, v, "kaeufer", ocr, spur)
+    t = feld_text(seiten, v, "kaeufer", ocr, spur)
+    if t is None:
+        raise BereichsFehler(f"Feld kaeufer fehlt (Vorlage {v['name']})")
+    z = t[1]
     plz = [i for i, s in enumerate(z) if re.match(r"\d{5} ", s)]
     if not plz or plz[-1] < 2:
         raise BereichsFehler(f"Käuferblock ohne Name, Straße, PLZ/Ort (Vorlage {v['name']})")
@@ -239,7 +242,8 @@ def _steuern(seiten, v, ocr, spur) -> dict[Decimal, Decimal]:
         return {}
     if not seiten:
         raise BereichsFehler("PDF ohne Seiten")
-    i = 0 if s["seite"] == "erste" else len(seiten) - 1
+    reihenfolge = range(len(seiten)) if s["seite"] == "erste" else range(len(seiten) - 1, -1, -1)
+    i = next((j for j in reihenfolge if treffer(seiten[j], s["anker"]["text"], ocr)), reihenfolge[0])
     ax, ay = s["anker"]["rahmen"][:2]
     ergebnis = {}
     for n, (x, y, _, satz) in enumerate(treffer(seiten[i], s["anker"]["text"], ocr)):
