@@ -1,6 +1,6 @@
 # Task 09: Probelauf, Aktivieren, Verwalten, Export (Logik)
 
-Spezifikation: `docs/lernmodus/spezifikation.md` 4, 7.3, 7.4, 10. Global Constraints in `index.md`.
+Spezifikation: `docs/lernmodus/spezifikation.md` 4, 7.3, 7.4, 10, 11 (F1: alles Verwalten per UAC; F2: Export nur `vorlage.yml`). Global Constraints in `index.md`.
 
 **Files:**
 - Create: `erechnung/anlernen/verwalten.py`, `tests/test_anlernen_verwalten.py`
@@ -11,13 +11,13 @@ Spezifikation: `docs/lernmodus/spezifikation.md` 4, 7.3, 7.4, 10. Global Constra
   - `MIN_MUSTER = 2`
   - `probelauf(entwurf: Path, k: Konfig) -> dict` → `{"vorlage_fehler": str|None, "muster": [{"id", "ok", "fehler", "werte", "positionen", "ignoriert", "spur", "mustang"}], "bereit": bool}`
   - `aktivieren(entwurf: Path, konfig: Path, benutzer: str) -> dict`, `deaktivieren/reaktivieren/loeschen(name, konfig, benutzer) -> dict` (alle `{"ok": bool, "meldung": str}`)
-  - `exportieren(entwurf: Path, ziel: Path) -> Path`
+  - `exportieren(entwurf: Path, ziel: Path) -> Path` (nur `vorlage.yml`, keine Muster)
   - Testhilfen `_konfig_datei(tmp_path)`, `_entwurf(ordner)`, `BEISPIEL` (Task 10 importiert sie)
 
 - [ ] **Step 1: Failing tests** – `tests/test_anlernen_verwalten.py`
 
 ```python
-import hashlib, json, zipfile
+import hashlib, json
 from pathlib import Path
 import pytest, yaml
 from erechnung.anlernen import verwalten
@@ -113,9 +113,12 @@ def test_deaktivieren_reaktivieren_loeschen(umgebung, monkeypatch):
     assert deaktivieren("../x", konfig, "kasse")["ok"] is False
 def test_export(umgebung, tmp_path):
     e, _, _ = umgebung
-    z = exportieren(e, tmp_path)
-    with zipfile.ZipFile(z) as f:
-        assert sorted(f.namelist()) == ["muster/m1.pdf", "muster/m2.pdf", "vorlage.yml"]
+    z = exportieren(e, tmp_path)   # F2: nur die Vorlage, keine Muster-PDFs
+    assert z.name.startswith("erechnung-vorlage-test-bereiche-") and z.suffix == ".yml"
+    assert [p.name for p in tmp_path.iterdir()] == [z.name]
+    v = yaml.safe_load(z.read_text(encoding="utf-8"))
+    pruefe_bereichsvorlage(v)
+    assert "%PDF" not in z.read_text(encoding="utf-8")
 ```
 
 - [ ] **Step 2: FAIL prüfen** – `/root/.venvs/erechnung/bin/python -m pytest tests/test_anlernen_verwalten.py -q`
@@ -178,9 +181,11 @@ Protokoll `_protokoll(angelernt, aktion, name, benutzer, datei=None, muster=0)`:
 
 `deaktivieren`: `<name>.yml` → `deaktiviert/<name>.yml` (vorhandenes Ziel vorher mit Stempel umbenennen); `reaktivieren`: zurück, vorher `pruefe_bereichsvorlage`; `loeschen`: aktive oder deaktivierte Datei löschen (gestempelte Altstände bleiben). Jeder Name zuerst gegen `NAME.fullmatch` (sonst `ok False`). Alle drei protokollieren.
 
-`exportieren(entwurf, ziel)`: ZIP `erechnung-vorlage-<name>-<YYYY-MM-DD>.zip` in `ziel` mit `vorlage.yml` (`yaml.safe_dump` des Entwurfs) und `muster/m*.pdf`; keine `.png`, keine `.woerter.json`.
+`exportieren(entwurf, ziel)`: **nur** `erechnung-vorlage-<name>-<YYYY-MM-DD>.yml` in `ziel` (`yaml.safe_dump` des Entwurfs, vorher `pruefe_bereichsvorlage`); keine Muster-PDFs, keine `.png`, keine `.woerter.json`, kein ZIP (F2).
 
 - [ ] **Step 4: Alle Tests grün** – `/root/.venvs/erechnung/bin/python -m pytest -q`
+
+- [ ] **Step 4b: Probelauf mit fremden Layouts (nur gm-claude)** – Entwurf mit `/root/erechnung-testdaten/fremd/E-1.pdf` und `E-2.pdf` als Muster (Vorlage von Hand oder aus Task 04): `probelauf` bestanden, Summen gleich `E-<n>.soll.json` (Nachlass), Käufer ist der Rechnungsempfänger, nicht die Lieferanschrift. Gegenprobe: Muster `F-1.pdf` (§ 19 UStG) → `bereit` False mit verständlichem Fehler. Ergebnis im Commit vermerken.
 
 - [ ] **Step 5: Commit**
 

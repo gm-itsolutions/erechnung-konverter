@@ -36,6 +36,8 @@ s.serve_forever()
 
 Start (Hintergrund): `/root/.venvs/erechnung/bin/python /root/ek-wt-lern/werkzeuge/anlernen_demo.py /tmp/anlernen-demo`.
 
+Optional für realistischere Layouts: zusätzlich PDFs aus `/root/erechnung-testdaten/fremd/` (z. B. `A-1.pdf`, `B-1.pdf`, `G-1-bild.pdf`) nach `/tmp/anlernen-demo/Fehler/` kopieren; sie erscheinen dann in „Aus Fehler-Ordner übernehmen“.
+
 - [ ] **Step 2: `index.html`** – Gerüst nach der Vorlage: `<html lang="de">`, `<meta name="csrf" content="{{csrf}}">`, `<meta name="robots" content="noindex">`, `gm.css`, `app.css`, `favicon.svg`, `<script src="/statisch/anlernen.js" defer>`. Kein Inline-Skript, kein `style=` (CSP).
   - `.sidebar`: Logo, App-Name „E-Rechnung anlernen“, `.nav` mit „Vorlagen“ (`#vorlagen`) und „Anlernen“ (`#anlernen`, `aria-current="page"` je nach Ansicht), unten „Beenden“ (`.btn`, ruft `POST /api/beenden`, dann Text „Oberfläche beendet. Fenster schließen.“).
   - Ansicht `#vorlagen`: `.page-head` „Vorlagen“ + Primär „Neue Vorlage“; `.card` mit `.table-wrap` (Name, Art, Status-`.pill`); Inhalt füllt Task 12. Dialog „Neue Vorlage“ als `.card` mit `.field` (Name, `.hint` „nur Kleinbuchstaben, Ziffern und Bindestrich“) und `.actions`.

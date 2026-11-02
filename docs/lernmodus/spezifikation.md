@@ -1,6 +1,6 @@
 # Lernmodus – Spezifikation
 
-- **Stand:** 02.11.2026, Entwurf 1 (Planung, noch kein Code)
+- **Stand:** 02.11.2026, Entwurf 2 (Fragen F1–F3 beantwortet, noch kein Code)
 - **Gehört zu:** `docs/spezifikation.md` (Konverter 0.1.6). Diese Datei ergänzt sie; wo nichts Abweichendes steht, gilt die Hauptspezifikation (Summenabgleich Abschnitt 8, Mustang 3.4, Ordner und Rechte 6, Grundschutz 10).
 - **Plan:** `docs/lernmodus/plan/index.md`
 - **Zielversion:** 0.2.0
@@ -64,7 +64,7 @@ Bedrohung: andere lokale Prozesse und andere angemeldete Benutzer (Terminalserve
 | Deaktivierte und ersetzte | `<Programmordner>\vorlagen\angelernt\deaktiviert\<name>[-<stempel>].yml` | dto. |
 | Protokoll | `<Programmordner>\vorlagen\angelernt\protokoll.txt` | dto. |
 
-- **Aktivieren braucht Administratorrechte (UAC).** Die Vorlage steuert den SYSTEM-Dienst und damit Rechnungen aller Benutzer des PCs. Die Oberfläche (Benutzerkontext) startet dafür `python.exe -m erechnung vorlage aktivieren …` per `ShellExecuteExW` mit dem Verb `runas`. Der erhöhte Prozess **vertraut dem Entwurf nicht**: Er prüft das Schema, führt den Probelauf mit allen Mustern selbst erneut aus, prüft Konflikte und schreibt erst dann (temporäre Datei, `os.replace`). Ergebnis als Exit-Code und JSON-Datei, die die Oberfläche anzeigt. Gleiches gilt für Deaktivieren, Reaktivieren und Löschen. Ist der Benutzer kein Administrator, fragt UAC nach einem Admin-Konto (GM IT oder der Admin des Kunden). Frage F1.
+- **Aktivieren braucht Administratorrechte (UAC).** Die Vorlage steuert den SYSTEM-Dienst und damit Rechnungen aller Benutzer des PCs. Die Oberfläche (Benutzerkontext) startet dafür `python.exe -m erechnung vorlage aktivieren …` per `ShellExecuteExW` mit dem Verb `runas`. Der erhöhte Prozess **vertraut dem Entwurf nicht**: Er prüft das Schema, führt den Probelauf mit allen Mustern selbst erneut aus, prüft Konflikte und schreibt erst dann (temporäre Datei, `os.replace`). Ergebnis als Exit-Code und JSON-Datei, die die Oberfläche anzeigt. Gleiches gilt für Deaktivieren, Reaktivieren und Löschen. Ist der Benutzer kein Administrator, fragt UAC nach einem Admin-Konto (GM IT oder der Admin des Kunden). Entschieden (F1): Aktivieren, Deaktivieren, Reaktivieren und Löschen nur mit Administrator-Freigabe.
 - `protokoll.txt` je Aktion eine Zeile: Zeit, Windows-Benutzer der Oberfläche, Admin-Konto, Aktion, Name, SHA-256 der Datei, Anzahl Muster.
 - **Updates:** `vorlagen\` liegt neben `versionen\`, gm-update ersetzt es nicht. Ein späteres Release liest `format: 1` weiter; ein unbekanntes `format` wird mit Logeintrag übersprungen (die Vorlage greift dann nicht, Rechnungen gehen nach `Fehler`, kein falsches Auslesen).
 - **Überwacher lädt ohne Neustart:** Er prüft in jedem Takt Name, Größe und Änderungszeit der `*.yml` in `vorlagen\` und `vorlagen\angelernt\`. Ändert sich etwas, lädt er die Vorlagen neu. Eine ungültige Datei in diesen beiden Ordnern wird mit Warnung im Log übersprungen, der Überwacher läuft weiter (bisher: Abbruch beim Start).
@@ -193,7 +193,7 @@ Zeilen eines Rahmens: Wörter nach Mittelpunkt-y gruppiert (Toleranz: halbe mitt
 
 - „Vorlage aktivieren“ (Primär-Button) nur, wenn **mindestens zwei Muster** fehlerfrei sind, alle Muster fehlerfrei sind und alle Häkchen gesetzt sind. Danach UAC (4.).
 - Liste „Vorlagen“: mitgelieferte (nur lesen), aktive angelernte (Deaktivieren, Löschen), deaktivierte (Reaktivieren, Löschen). Erneutes Aktivieren desselben Namens ersetzt die alte Datei, die nach `deaktiviert\<name>-<stempel>.yml` wandert.
-- **Export an GM IT:** ZIP mit `vorlage.yml` und den Muster-PDFs in den Download-Ordner, Name `erechnung-vorlage-<name>-<datum>.zip`. Der Kunde schickt es an GM IT; Marvin prüft und übernimmt die Vorlage bei Bedarf ins Release (`erechnung/vorlagen/`, Muster nur nach `/root/erechnung-testdaten/`). Frage F2.
+- **Export an GM IT:** nur `vorlage.yml`, **keine Muster-PDFs** (F2), als `erechnung-vorlage-<name>-<datum>.yml` in den Download-Ordner. Der Kunde schickt sie an GM IT; Marvin prüft sie gegen eine eigene Rechnung dieses Layouts (vom Kunden auf dem üblichen Weg angefordert, nur nach `/root/erechnung-testdaten/`) und übernimmt sie bei Bedarf ins Release (`erechnung/vorlagen/`). Die Datei enthält nur Koordinaten, Ankertexte und Schlüsselwörter, keine Rechnungsdaten.
 
 ## 8. Komponenten
 
@@ -212,7 +212,8 @@ Zeilen eines Rahmens: Wörter nach Mittelpunkt-y gruppiert (Toleranz: halbe mitt
 
 ## 9. Tests
 
-- pytest: Schema (gültig, jede Regel einzeln verletzt, Größe), Auslesen per Bereich mit synthetischen reportlab-PDFs (zwei Layouts, verschoben, mehrseitig mit Übertrag, mehrzeilige Bezeichnung), dasselbe als Bild-PDF über Tesseract (übersprungen ohne Tesseract), TSV-Parser mit fester TSV, Überwacher-Neuladen, Server (Token einmalig, Cookie, Host, Origin, CSRF, Pfade, Größen, Leerlauf), Verwalten (Probelauf, Aktivieren mit ersetztem `als_admin`, Konflikt, Protokoll, Export). Bestehende Tests laufen unverändert.
+- Testdaten: Unit-Tests nutzen die synthetischen Muster aus `tests/hilfen_bereiche.py` (CI). Für Gegenproben mit realistischeren Layouts: `werkzeuge/fremdrechnungen.py` erzeugt deterministisch Rechnungen in sieben fremden Layouts (A–G) nach `/root/erechnung-testdaten/fremd/` (`<layout>-<n>.pdf`, je Layout ein `<layout>-1-bild.pdf`, je Datei `.soll.json` mit Sollwerten und erwartetem Verhalten); erzeugen mit `/root/.venvs/erechnung/bin/python werkzeuge/fremdrechnungen.py`, Gegenprobe mit `--gegenprobe`. Nur auf gm-claude, PDFs nicht ins Repo.
+- pytest: Schema (gültig, jede Regel einzeln verletzt, Größe), Auslesen per Bereich mit synthetischen reportlab-PDFs (zwei Layouts, verschoben, mehrseitig mit Übertrag, mehrzeilige Bezeichnung), dasselbe als Bild-PDF über Tesseract (übersprungen ohne Tesseract), TSV-Parser mit fester TSV, Überwacher-Neuladen, Server (Token einmalig, Cookie, Host, Origin, CSRF, Pfade, Größen, Leerlauf), Verwalten (Probelauf, Aktivieren mit ersetztem `als_admin`, Konflikt, Protokoll, Export nur `vorlage.yml`). Bestehende Tests laufen unverändert.
 - Browser: Playwright (MCP auf gm-claude, Chromium) gegen den echten Server mit Testdaten: Markieren eines Feldes per Maus, Probelauf, Ansicht 1280 px hell und dunkel, 390 px Lesbarkeit der Liste. Kein Playwright in der CI (neue Abhängigkeit ohne Gewinn für die Logik, die die pytest-Tests abdecken).
 - Abnahme auf VM 108 (Task 11).
 
@@ -231,8 +232,8 @@ Unverändert aus Hauptspezifikation 10 und weiter gültig: KONF.8.1/8.2, DET.5.1
 | BER.3.13 | Sperre bei Inaktivität | Server endet nach 30 Min. ohne Anfrage |
 | KONF.7.9 | Einschränkung der Installation | keine neue Software, keine neue Abhängigkeit (Standardbibliothek, pypdfium2/pillow schon im Paket) |
 | DET.3.1 / DET.3.1.8 | Protokollierung, privilegierte Ereignisse | `protokoll.txt` (Wer, Admin, Was, SHA-256), `erechnung.log` (Neuladen, übersprungene Dateien), `anlernen.log` |
-| ASST.2.3 | Inventar der Anwendungen | aktive Vorlagen mit SHA-256 im Protokoll; Export an GM IT |
-| NOT.4.15 | Wiederherstellungsweg | Runbook: Vorlagen-Ordner sichern/zurückkopieren, Export-ZIP als Kopie bei GM IT; ersetzte Fassungen in `deaktiviert\` |
+| ASST.2.3 | Inventar der Anwendungen | aktive Vorlagen mit SHA-256 im Protokoll; Export (`vorlage.yml`) an GM IT |
+| NOT.4.15 | Wiederherstellungsweg | Runbook: Vorlagen-Ordner sichern/zurückkopieren, exportierte `vorlage.yml` als Kopie bei GM IT; ersetzte Fassungen in `deaktiviert\` |
 | DEV / TEST | Sichere Entwicklung, Tests | Schema ohne Regex/Ausführung, pytest inkl. Sicherheitstests, Playwright-Prüfung, VM-Abnahme |
 | X.1.1.2 | Zuständigkeiten | Anlernen: Kunde; Aktivieren: Admin des PCs (Kunde oder GM IT); Übernahme ins Release: GM IT |
 
@@ -242,15 +243,15 @@ Unverändert aus Hauptspezifikation 10 und weiter gültig: KONF.8.1/8.2, DET.5.1
 |---|---|---|---|---|
 | L1 | webui-Regel 18 (Passwort + TOTP) | Keine Anmeldung, Einmal-Token | Nur Loopback, an den startenden Benutzer gebunden, kurzlebig; ein Passwort hätte niemand und wäre schwächer als der Token | dauerhaft (GM-intern, keine Kundenzustimmung nötig) |
 | L2 | webui-Regel 19 (`Secure`-Cookie) | Cookie ohne `Secure` | HTTP über Loopback, kein Netzweg | dauerhaft (GM-intern) |
-| L3 | BER.4.1 | Muster-PDFs mit Kundendaten im Benutzerprofil und im Export | Werden für Probelauf und Prüfung bei GM IT gebraucht; Benutzer kennt die Rechnungen ohnehin; Löschen mit dem Entwurf | dauerhaft, Kundenzustimmung über F2 |
+| ~~L3~~ | BER.4.1 | **entfällt** (F2, 02.11.2026): Muster-PDFs bleiben im Profil des Benutzers, der die Rechnungen ohnehin kennt, und werden mit dem Entwurf gelöscht; der Export enthält nur `vorlage.yml` | – | – |
 
 **Restrisiken:** Eine angelernte Vorlage kann Nummer, Datum oder Käufer falsch zuordnen, wenn der Benutzer das Häkchen ohne Prüfung setzt; Beträge bleiben gesichert. Ein Administrator kann jede Vorlage aktivieren (gewollt). Der Parser liest Vorlagen als SYSTEM; durch Schema, Größengrenze und fehlende Regex bleibt das auf Datenfehler begrenzt (A1 der Hauptspezifikation bleibt).
 
-## 11. Fragen an Marvin
+## 11. Fragen an Marvin (beantwortet 02.11.2026)
 
-- **F1 Aktivieren nur mit Admin (UAC)?** Empfehlung ja (oben so geplant). Alternative: Benutzer dürfen in `vorlagen\angelernt` schreiben, dann neue Abweichung zu BER.4.1, Kundenzustimmung nötig. Wichtig: Haben die Anwender bei Prignitz Markt ein Admin-Konto, oder macht GM IT das Aktivieren per Fernwartung?
-- **F2 Export mit Muster-PDFs?** Empfehlung ja (ohne Muster kann GM IT nicht prüfen); Rechnungen gehen ohnehin an GM IT als Dienstleister (AV-Vertrag prüfen). Alternative: nur `vorlage.yml`.
-- **F3 Prignitz Markt:** Soll der Kunde die erste Vorlage selbst anlernen (Abnahme beim Kunden), oder baut GM IT sie vorher mit dem Lernmodus und der Kunde nutzt ihn erst für weitere Layouts? Empfehlung: GM IT lernt die erste beim Termin gemeinsam mit dem Kunden an.
+- **F1 Aktivieren nur mit Admin (UAC)?** **Ja.** Aktivieren, Deaktivieren, Reaktivieren und Löschen angelernter Vorlagen nur mit Administrator-Freigabe (UAC), wie in 4. geplant. Keine Schreibrechte für Benutzer in `vorlagen\angelernt`, keine neue Abweichung zu BER.4.1.
+- **F2 Export mit Muster-PDFs?** **Nein.** Export an GM IT nur `vorlage.yml`, keine Muster-PDFs (7.4). Abweichung L3 entfällt (10.). Braucht GM IT zur Prüfung eine Rechnung des Layouts, fordert Marvin sie gesondert an.
+- **F3 Prignitz Markt:** Die erste Prignitz-Markt-Vorlage lernt **Marvin zusammen mit dem Kunden** beim Termin an (Kunde bedient, Marvin begleitet und gibt per UAC frei). Weitere Layouts lernt der Kunde danach selbst an.
 
 ## 12. Abnahme
 

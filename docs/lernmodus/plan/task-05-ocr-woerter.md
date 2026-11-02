@@ -149,6 +149,8 @@ Zirkelimport prüfen: `bereiche` importiert `modell` und `pdfplumber`, nicht `oc
 - [ ] **Step 6: Alle Tests** – `/root/.venvs/erechnung/bin/python -m pytest -q`. Auf gm-claude ist Tesseract installiert, die Tesseract-Tests laufen also mit. Liest Tesseract im synthetischen Muster etwas falsch (z. B. `%`), erst `tests/hilfen_bereiche.py` prüfen (Schriftgröße 10 pt, 300 dpi); die Unschärfe in `treffer` (≥ 0,85) nicht weiter senken. Kein Erfolg → im Commit vermerken und Hauptsitzung melden, nicht den Test aufweichen.
 - [ ] **Step 6b: Echte Lexware-Tests** – `ERECHNUNG_TESTDATEN=/root/erechnung-testdaten /root/.venvs/erechnung/bin/python -m pytest -q -m echt` grün (Regex-Weg unverändert).
 
+- [ ] **Step 6c: Bild-PDFs fremder Layouts (nur gm-claude)** – `erkenne_seiten` auf `/root/erechnung-testdaten/fremd/*-bild.pdf` (200 dpi, ohne Text): je Datei müssen Nummer und Brutto aus `*.soll.json` als Wörter vorkommen; Laufzeit je Seite notieren. Kein Test im Repo, Ergebnis im Commit vermerken.
+
 - [ ] **Step 7: Commit**
 
 ```bash

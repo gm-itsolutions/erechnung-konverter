@@ -6,7 +6,7 @@
 
 **Architecture:** Neues Vorlagenformat `art: bereiche` (Koordinaten relativ zur Seite plus wörtliche Anker, keine Regex) mit eigenem Leser `erechnung/bereiche.py` auf Wortlisten aus pdfplumber bzw. Tesseract-TSV. Oberfläche = lokaler `http.server` der App auf 127.0.0.1 im Benutzerkontext mit Einmal-Token, Canvas-JS ohne Bibliotheken, GM-webui-Look. Aktivieren über einen per UAC erhöhten CLI-Aufruf, der alles selbst neu prüft und nach `<Programmordner>\vorlagen\angelernt\` schreibt; der Überwacher lädt Änderungen im Takt neu.
 
-**Tech Stack:** Python 3.14 (Embeddable), Standardbibliothek (`http.server`, `secrets`, `hmac`, `ctypes`, `difflib`, `zipfile`), pdfplumber, pypdfium2 + pillow (schon im Paket), pyyaml, Tesseract 5.5.3 (Paket), Mustang 2.26.0 (Paket), pytest + reportlab (Test), Playwright-MCP auf gm-claude (Browserprüfung), PowerShell 5.1.
+**Tech Stack:** Python 3.14 (Embeddable), Standardbibliothek (`http.server`, `secrets`, `hmac`, `ctypes`, `difflib`), pdfplumber, pypdfium2 + pillow (schon im Paket), pyyaml, Tesseract 5.5.3 (Paket), Mustang 2.26.0 (Paket), pytest + reportlab (Test), Playwright-MCP auf gm-claude (Browserprüfung), PowerShell 5.1.
 
 **Spec:** `docs/lernmodus/spezifikation.md` (ergänzt `docs/spezifikation.md`)
 
@@ -22,7 +22,9 @@
 - Server nur `127.0.0.1`, nie `0.0.0.0`; Prozess im Benutzerkontext. Sicherheitsregeln Spezifikation 3.3 sind nicht verhandelbar.
 - Oberfläche: GM-webui (`/root/ai-os/50-vorlagen/webui/README.md` lesen). `gm.css`, `fonts/`, `logo.png`, `favicon.svg` unverändert kopieren; eigenes CSS nur in `app.css` mit Tokens; kein CDN, kein Framework, kein Inline-Skript (CSP).
 - Pfade: Programmordner `%ProgramFiles%\GM-IT\erechnung-konverter`, aktive angelernte Vorlagen `<konfig-ordner>\vorlagen\angelernt\`, Entwürfe `%LOCALAPPDATA%\GM-IT\erechnung-konverter\anlernen\` (in Tests immer per Parameter `daten: Path` ersetzbar).
+- **Entscheidungen F1–F3** (Spezifikation 11): Verwalten nur per UAC; Export nur `vorlage.yml` ohne Muster-PDFs; erste Prignitz-Markt-Vorlage lernt Marvin mit dem Kunden an.
 - **Keine Secrets, keine echten Kundendaten** im Repo; Tests mit erfundenen Daten (`tests/hilfen.py`: `VERKAEUFER`). Echte PDFs nur `/root/erechnung-testdaten/`.
+- **Testdaten fremder Layouts:** `werkzeuge/fremdrechnungen.py` erzeugt deterministisch Rechnungen in sieben fremden Layouts (A–G) nach `/root/erechnung-testdaten/fremd/` (`<layout>-<n>.pdf`, je Layout ein `<layout>-1-bild.pdf`, je Datei `.soll.json` mit Sollwerten und erwartetem Verhalten). Erzeugen: `/root/.venvs/erechnung/bin/python /root/ek-wt-lern/werkzeuge/fremdrechnungen.py` (fehlt der Ordner, zuerst ausführen). Unit-Tests bleiben bei `tests/hilfen_bereiche.py` (CI hat den Ordner nicht); die fremden Layouts dienen zur Gegenprobe in Task 04, 05, 09, 11, 12, 14. Grenzfälle mit erwartetem Fehler: C (Datum mit Monatsnamen), F (§ 19 UStG, Satz 0).
 - In `/root/ai-os` ändert kein Subagent etwas.
 - Grundschutz: Spezifikation Abschnitt 10 gilt; neue Abweichungen dort eintragen.
 - Schnittstellen-Namen exakt wie unten und in den Task-Dateien.
@@ -39,7 +41,7 @@
 | 06 | `task-06-ueberwacher-neuladen.md` | Überwacher: `angelernt`, tolerant, Neuladen | Subagent | 30 Min. | 01 | offen |
 | 07 | `task-07-server-sicherheit.md` | Anlern-Server: Token, Cookie, CSRF, Host, Leerlauf, CLI | Subagent | 60 Min. | 06 | offen |
 | 08 | `task-08-server-endpunkte.md` | Server: Entwürfe, Muster, Seitenbilder, Wörter, Vorschau | Subagent | 60 Min. | 03, 05, 07 | offen |
-| 09 | `task-09-verwalten.md` | Probelauf, Aktivieren, Verwalten, Export (Logik) | Subagent | 60 Min. | 04, 05, 06, 07 | offen |
+| 09 | `task-09-verwalten.md` | Probelauf, Aktivieren, Verwalten, Export `vorlage.yml` (Logik) | Subagent | 60 Min. | 04, 05, 06, 07 | offen |
 | 10 | `task-10-uac-routen-cli.md` | UAC-Aufruf, Verwaltungs-Routen, CLI `vorlage` | Subagent | 45 Min. | 08, 09 | offen |
 | 11 | `task-11-ui-markieren.md` | Oberfläche: Muster und Markieren (Canvas, GM-Look) | Subagent | 90 Min. | 08 | offen |
 | 12 | `task-12-ui-probelauf.md` | Oberfläche: Probelauf, Aktivieren, Vorlagenliste; Playwright | Subagent | 75 Min. | 10, 11 | offen |

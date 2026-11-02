@@ -4,7 +4,7 @@ Spezifikation: `docs/lernmodus/spezifikation.md` 6.5, 12. Ablauf Release und Fre
 
 **Wer:** Hauptsitzung (Merge, Tag), **Marvin** (Freigabe per YubiKey, UAC-Admin-Konto auf der VM bereitstellen), Subagent (VM-Abnahme, meldet nur das Ergebnis).
 
-**Voraussetzungen:** Tasks 01–13 erledigt, Branch `lernmodus` gepusht, alle Tests grün; Task 12 Browserprüfung ohne offene Mängel; Fragen F1–F3 der Spezifikation beantwortet (F1 bestimmt, ob UAC so bleibt).
+**Voraussetzungen:** Tasks 01–13 erledigt, Branch `lernmodus` gepusht, alle Tests grün; Task 12 Browserprüfung ohne offene Mängel; Fragen F1–F3 der Spezifikation beantwortet (02.11.2026: F1 UAC bleibt, F2 Export nur `vorlage.yml`, F3 erste Prignitz-Markt-Vorlage lernt Marvin mit dem Kunden an – nach dieser Abnahme beim Kundentermin, nicht Teil dieses Tasks).
 
 - [ ] **Step 1: Gesamtprüfung auf gm-claude**
   - `ERECHNUNG_TESTDATEN=/root/erechnung-testdaten /root/.venvs/erechnung/bin/python -m pytest /root/ek-wt-lern/tests -q` → alles grün, keine `echt`-Tests übersprungen (Regex-Weg der Lexware-Vorlage unverändert).
@@ -15,7 +15,7 @@ Spezifikation: `docs/lernmodus/spezifikation.md` 6.5, 12. Ablauf Release und Fre
 
 - [ ] **Step 3: Tag `v0.2.0`**, Release-Workflow grün, Artefakt prüfen (ZIP enthält `app/erechnung/anlernen/statisch/index.html`, `gm.css`, `fonts/`); danach **Marvin**: Freigabe `v0.2.0` per YubiKey.
 
-- [ ] **Step 4: Testrechnung im fremden Layout auf die VM** – `tests/hilfen_bereiche.py` erzeugt auf gm-claude zwei Muster (`werkstatt_pdf(MUSTER1, SUMMEN1)` und die Variante mit drei Positionen) plus eine dritte Rechnung (vier Positionen, andere Nummer `BW-2026-18`) für den Echtlauf; per bekanntem Weg (Task 10 alt: NetLock/Relay) nach `C:\Users\<testbenutzer>\Desktop\lernmodus\` kopieren.
+- [ ] **Step 4: Testrechnung im fremden Layout auf die VM** – zusätzlich zu den Werkstatt-Mustern unten ein realistischeres fremdes Layout aus `/root/erechnung-testdaten/fremd/` (`werkzeuge/fremdrechnungen.py`): `B-1.pdf`, `B-2.pdf` als Muster, `B-3.pdf` als dritte Rechnung, Sollwerte in `B-<n>.soll.json`. `tests/hilfen_bereiche.py` erzeugt auf gm-claude zwei Muster (`werkstatt_pdf(MUSTER1, SUMMEN1)` und die Variante mit drei Positionen) plus eine dritte Rechnung (vier Positionen, andere Nummer `BW-2026-18`) für den Echtlauf; per bekanntem Weg (Task 10 alt: NetLock/Relay) nach `C:\Users\<testbenutzer>\Desktop\lernmodus\` kopieren.
 
 - [ ] **Step 5: Abnahme VM 108** (Spezifikation 12), Benutzer **ohne** Adminrechte, Ergebnis je Punkt mit Zeit, Beleg (Logzeile/Screenshot) und ok/nicht ok in `docs/testprotokoll.md`, neuer Abschnitt „Lernmodus 0.2.0“:
   1. gm-update hat 0.2.0 installiert (`stand.json`); Startmenü „E-Rechnung anlernen“ vorhanden, öffnet Edge mit der Oberfläche; Taskmanager: `pythonw.exe` läuft als Testbenutzer, nicht als SYSTEM.
@@ -27,7 +27,7 @@ Spezifikation: `docs/lernmodus/spezifikation.md` 6.5, 12. Ablauf Release und Fre
   7. Oberfläche 30 Minuten unbenutzt → Prozess beendet (oder Leerlauf-Zeit für den Test nicht ändern, sondern Zeitpunkt protokollieren und später prüfen).
   8. Deaktivieren (UAC) → dritte Rechnung erneut drucken → `Fehler` „keine Vorlage passt“; Reaktivieren → wieder E-Rechnung.
   9. Update-Überleben: neue Freigabe (z. B. `v0.2.1` mit Doku-Änderung oder erneute Freigabe laut Runbook) → nach dem Update ist die Vorlage weiter aktiv und wandelt um.
-  10. „Für GM IT exportieren“ → ZIP im Download-Ordner mit `vorlage.yml` und Mustern.
+  10. „Für GM IT exportieren“ → `erechnung-vorlage-<name>-<datum>.yml` im Download-Ordner, keine PDFs (F2).
   11. Startmenü-Verknüpfung mit `pwsh`-Syntaxprüfung nicht möglich gewesen? Dann hier `einrichten.ps1` einmal erneut als Admin ausführen (wiederholbar, keine Fehler).
 
 - [ ] **Step 6: Nacharbeit** – Gefundene Fehler als Fix-Commits auf einem Branch `lernmodus-fix`, neue Version; Projektstand in ai-os `30-projekte/erechnung-konverter.md` zieht die **Hauptsitzung** nach (nicht der Subagent). Index-Status aller Tasks auf „erledigt (Commit …)“ setzen.

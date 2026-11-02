@@ -193,6 +193,8 @@ Prüfen, ob `Nachlass(betrag, grund)` die Reihenfolge in `modell.py` trifft (`gr
 
 - [ ] **Step 5: Alle Tests grün** – `/root/.venvs/erechnung/bin/python -m pytest -q`
 
+- [ ] **Step 5b: Gegenprobe fremde Layouts (nur gm-claude, kein Test im Repo)** – mit einer von Hand nach `/root/erechnung-testdaten/fremd/D-1.pdf` gebauten `art: bereiche`-Vorlage (Koordinaten über `woerter_aus_pdf` ablesen) `rechnung_aus_bereichen` für `D-1.pdf`, `D-2.pdf`, `D-3.pdf` (3 Seiten, Übertrag, wiederholter Kopf) aufrufen und Positionen, Netto, Steuer, Brutto gegen `D-<n>.soll.json` vergleichen; Übertragszeilen dürfen nur als ignorierte Zeilen auftauchen. Ergebnis im Commit vermerken, Abweichungen der Hauptsitzung melden.
+
 - [ ] **Step 6: Commit**
 
 ```bash

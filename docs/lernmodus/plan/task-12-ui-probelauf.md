@@ -28,7 +28,9 @@ Spezifikation: `docs/lernmodus/spezifikation.md` 7.3, 7.4, 9. Global Constraints
   5. Checkboxen setzen: „Vorlage aktivieren“ wird aktiv (Klick nicht nötig, UAC gibt es auf Linux nicht; Antwort wäre „UAC gibt es nur unter Windows“ → `.alert.err` muss erscheinen, das ist der erwartete Fehlerweg).
   6. Screenshots: 1280 px hell und dunkel (`browser_emulate_media` `colorScheme`), Ansichten Markieren und Probelauf; 390 px hell und dunkel der Vorlagenliste und der Probelauf-Ansicht. Kein seitliches Scrollen der Seite (`document.documentElement.scrollWidth <= innerWidth`), Kontrast lesbar, ein Primär-Button je Ansicht.
   7. `browser_console_messages`: keine Fehler, keine CSP-Verletzung.
-  Gefundene Mängel beheben und Schritt 3–7 wiederholen. Screenshots nicht ins Repo.
+  8. Zweiter Durchgang mit fremdem Layout: `/root/erechnung-testdaten/fremd/G-1.pdf` und `G-2.pdf` (Nummer `RG-2026/117`, Datum `TT.MM.JJ`, 19 % und 7 %) in den Fehler-Ordner der Demo kopieren, Vorlage „havelgruen“ markieren, Probelauf gegen `G-<n>.soll.json` → beide bestanden. Gegenprobe `C-1.pdf` (Datum mit Monatsnamen): Probelauf zeigt einen verständlichen Datumsfehler.
+  9. Export: „Für GM IT exportieren“ liefert nur `erechnung-vorlage-<name>-<datum>.yml`, keine PDFs (F2).
+  Gefundene Mängel beheben und Schritt 3–9 wiederholen. Screenshots nicht ins Repo.
 
 - [ ] **Step 5: Tests** – `/root/.venvs/erechnung/bin/python -m pytest -q`
 
