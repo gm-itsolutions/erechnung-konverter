@@ -1,0 +1,68 @@
+# Aus gm-itsolutions/gm-update (vorlagen/release.yml). Tag v<x.y.z> baut das Windows-ZIP und lädt es mit gm-update hoch.
+# GM_UPDATE_SHA256: SHA-256 von gm-update-<v>-linux-amd64 aus der release.json der Paketablage.
+name: release
+on:
+  push:
+    tags: ['v*']
+env:
+  PRODUKT: erechnung-konverter
+  GM_UPDATE_VERSION: '0.1.4'
+  GM_UPDATE_SHA256: 'c0f324db4d657b75b8f09b04fdceee9cbd6402509d284c6b0c067f71d7e537ce'
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Tag prüfen
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"
+          echo "$V" | grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?'
+          case "$V" in *-beta.*) ;; *) git merge-base --is-ancestor "$GITHUB_SHA" origin/main ;; esac
+          echo "V=$V" >> "$GITHUB_ENV"
+      - name: gm-update holen
+        env:
+          PAKET_TOKEN: ${{ secrets.PAKET_TOKEN }}
+        run: |
+          set -euo pipefail
+          f="gm-update-$GM_UPDATE_VERSION-linux-amd64"
+          curl -fsS -H "Authorization: token $PAKET_TOKEN" -o /usr/local/bin/gm-update \
+            "$GITHUB_SERVER_URL/api/packages/gm-itsolutions/generic/gm-update/$GM_UPDATE_VERSION/$f"
+          echo "$GM_UPDATE_SHA256  /usr/local/bin/gm-update" | sha256sum -c -
+          chmod 0755 /usr/local/bin/gm-update
+      - uses: https://github.com/actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.14'
+      - name: Tests
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q
+      - name: Bauen (Datei)
+        if: hashFiles('Dockerfile') == ''
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ./release/bauen.sh "$V"
+      - name: Commit-Liste
+        run: |
+          set -euo pipefail
+          case "$V" in
+            *-beta.*) vorher=$(git tag --list 'v*' --sort=-v:refname --merged "$GITHUB_SHA^" | head -n1) ;;
+            *) vorher=$(git tag --list 'v*' --sort=-v:refname --merged "$GITHUB_SHA^" | grep -v -- '-beta\.' | head -n1 || true) ;;
+          esac
+          if [ -n "$vorher" ]; then git log --oneline "$vorher..$GITHUB_SHA" > dist/commits.txt; else git log --oneline -n 50 "$GITHUB_SHA" > dist/commits.txt; fi
+      - name: Hochladen
+        env:
+          PAKET_TOKEN: ${{ secrets.PAKET_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -f dist/image-digest ]; then
+            gm-update release --produkt "$PRODUKT" --version "$V" --commit "$(git rev-parse "$GITHUB_SHA^{commit}")" --commits-datei dist/commits.txt \
+              --image "$(cat dist/image-digest)" --ausgabe dist/release.json --hochladen
+          else
+            gm-update release --produkt "$PRODUKT" --version "$V" --commit "$(git rev-parse "$GITHUB_SHA^{commit}")" --commits-datei dist/commits.txt \
+              --ausgabe dist/release.json --hochladen dist/*.zip
+          fi
