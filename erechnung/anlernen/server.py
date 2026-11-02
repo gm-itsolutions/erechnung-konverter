@@ -14,6 +14,7 @@ log = logging.getLogger("erechnung.anlernen")
 STATISCH = Path(__file__).parent / "statisch"
 NAME, MUSTER = re.compile(r"[a-z0-9][a-z0-9-]{1,39}"), re.compile(r"m[0-9]{1,3}")
 GERAETE = {"con", "prn", "aux", "nul", *(f"{g}{i}" for g in ("com", "lpt") for i in range(1, 10))}   # Windows-Gerätenamen
+MAX_HOEHE = 6000    # Pixel; 1400 breit, A4 = 1980
 MAX_SEITEN, DATEINAME = 20, re.compile(r"[\w .-]{1,80}")
 LESER = {"nummer": _nummer, "nummer_kontrolle": _nummer, "datum": _datum, "leistungsdatum": _datum, "faellig": _datum,
          "zahlungsziel_tage": _tage, "summe_netto": _betrag, "summe_ust": _betrag, "summe_brutto": _betrag, "nachlass": _betrag}
@@ -166,17 +167,26 @@ def seiten_von(z, name, m) -> list:
         if lesart is None or len(lesart) < 3:
             raise Fehler(409, "Texterkennung lieferte keine Wortlage")
         seiten = lesart[2]
-    cache.write_text(json.dumps([[[w.text, *(round(x, 4) for x in w[1:])] for w in s] for s in seiten]), encoding="utf-8")
+    _atomar(cache, json.dumps([[[w.text, *(round(x, 4) for x in w[1:])] for w in s] for s in seiten]).encode())
     return seiten
+def _atomar(ziel: Path, daten: bytes) -> None:
+    tmp = ziel.with_name(ziel.name + ".tmp")
+    tmp.write_bytes(daten)
+    os.replace(tmp, ziel)
 def _neues_muster(z, name, daten: bytes, dateiname: str):
     if not daten.startswith(b"%PDF-"):
         raise Fehler(400, "keine PDF-Datei")
     ordner = entwurf_ordner(z, name) / "muster"
-    k = next((i for i in range(1, 1000) if not (ordner / f"m{i}.pdf").exists()), None)
-    if k is None:
+    for k in range(1, 1000):
+        pdf = ordner / f"m{k}.pdf"
+        try:
+            with open(pdf, "xb") as f:      # atomar: parallele Uploads bekommen verschiedene IDs
+                f.write(daten)
+            break
+        except FileExistsError:
+            continue
+    else:
         raise Fehler(400, "zu viele Muster")
-    pdf = ordner / f"m{k}.pdf"
-    pdf.write_bytes(daten)
     try:
         d = pdfium.PdfDocument(pdf)
         try:
@@ -185,19 +195,20 @@ def _neues_muster(z, name, daten: bytes, dateiname: str):
             d.close()
         if not 1 <= seiten <= MAX_SEITEN:
             raise ValueError
+        n = len(re.findall(r"\w", pdf_text(pdf)))
     except Exception:
         pdf.unlink()
         raise Fehler(400, f"PDF unlesbar oder mehr als {MAX_SEITEN} Seiten") from None
     datei = unquote(dateiname)
     datei = datei if DATEINAME.fullmatch(datei) else "muster.pdf"
-    n = len(re.findall(r"\w", pdf_text(pdf)))
     info = {"datei": datei, "seiten": seiten, "text": n >= MIN_ZEICHEN}
-    pdf.with_suffix(".json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    _atomar(pdf.with_suffix(".json"), json.dumps(info, ensure_ascii=False).encode())
     return json_antwort({"id": f"m{k}", **{x: info[x] for x in ("seiten", "text")}})
 @route("GET", r"/api/entwurf/([^/]+)")
 def _entwurf_lesen(h, z, name):
     o = entwurf_ordner(z, name)
-    muster = [{"id": p.stem, **_muster_info(p)} for p in sorted((o / "muster").glob("m*.pdf"), key=lambda p: int(p.stem[1:]))]
+    muster = [{"id": p.stem, **_muster_info(p)} for p in sorted((o / "muster").glob("m*.pdf"), key=lambda p: int(p.stem[1:]))
+              if p.with_suffix(".json").is_file()]
     return json_antwort({"vorlage": json.loads((o / "vorlage.json").read_text(encoding="utf-8")), "muster": muster})
 @route("PUT", r"/api/entwurf/([^/]+)")
 def _entwurf_speichern(h, z, name):
@@ -219,6 +230,8 @@ def _muster_hoch(h, z, name):
         n = int(h.headers.get("Content-Length", ""))
     except ValueError:
         raise Fehler(400, "Content-Length fehlt") from None
+    if n < 0:
+        raise Fehler(400, "Content-Length ungültig")
     if n > MAX_PDF:
         raise Fehler(413, "PDF zu groß")
     return _neues_muster(z, name, h.rfile.read(n), h.headers.get("X-Dateiname", ""))
@@ -249,7 +262,12 @@ def _seitenbild(h, z, name, m, s):
         d = pdfium.PdfDocument(pdf)
         try:
             seite = d[s - 1]
-            seite.render(scale=1400 / seite.get_width()).to_pil().save(png)
+            b, hoehe = seite.get_size()
+            if b < 1 or hoehe < 1 or hoehe * 1400 / b > MAX_HOEHE:
+                raise Fehler(400, "Seitenformat ungültig")
+            tmp = png.with_name(png.name + ".tmp")
+            seite.render(scale=1400 / b).to_pil().save(tmp, format="PNG")
+            os.replace(tmp, png)
         finally:
             d.close()
     return 200, "image/png", png.read_bytes()

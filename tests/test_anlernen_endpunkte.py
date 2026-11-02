@@ -63,3 +63,31 @@ def test_vorschau_unvollstaendig_und_fehler(lauf):
     assert st == 200 and json.loads(b)["fehler"]
     assert anfrage(s, "GET", "/api/entwurf/werkstatt/muster/m9/woerter", kopf=lese)[0] == 404
     assert anfrage(s, "GET", "/api/entwurf/werkstatt/muster/m1/seite/2.png", kopf=lese)[0] == 404
+def test_content_length_negativ(lauf):
+    s, url, _ = lauf
+    _, schreibe = anmelden(s, url)
+    anfrage(s, "POST", "/api/entwurf", json.dumps({"name": "werkstatt"}).encode(), schreibe)
+    assert anfrage(s, "POST", "/api/entwurf/werkstatt/muster", b"",
+                   {**schreibe, "Content-Type": "application/pdf", "Content-Length": "-1"})[0] == 400
+def test_pdf_text_wirft_kein_waisenmuster(lauf, monkeypatch):
+    s, url, tmp = lauf
+    lese, schreibe = anmelden(s, url)
+    anfrage(s, "POST", "/api/entwurf", json.dumps({"name": "werkstatt"}).encode(), schreibe)
+    def kaputt(p):
+        raise RuntimeError("pdfminer")
+    monkeypatch.setattr(srv, "pdf_text", kaputt)
+    pdf = werkstatt_pdf(MUSTER1, SUMMEN1)
+    assert anfrage(s, "POST", "/api/entwurf/werkstatt/muster", pdf, {**schreibe, "Content-Type": "application/pdf"})[0] == 400
+    ordner = tmp / "daten" / "entwuerfe" / "werkstatt" / "muster"
+    assert list(ordner.iterdir()) == []
+    (ordner / "m1.pdf").write_bytes(pdf)          # Waise ohne .json: Entwurf bleibt lesbar
+    st, _, b = anfrage(s, "GET", "/api/entwurf/werkstatt", kopf=lese)
+    assert st == 200 and json.loads(b)["muster"] == []
+def test_muster_loeschen(lauf):
+    s, url, _ = lauf
+    lese, schreibe = anmelden(s, url)
+    anfrage(s, "POST", "/api/entwurf", json.dumps({"name": "werkstatt"}).encode(), schreibe)
+    anfrage(s, "POST", "/api/entwurf/werkstatt/muster", werkstatt_pdf(MUSTER1, SUMMEN1), {**schreibe, "Content-Type": "application/pdf"})
+    anfrage(s, "GET", "/api/entwurf/werkstatt/muster/m1/seite/1.png", kopf=lese)
+    assert anfrage(s, "DELETE", "/api/entwurf/werkstatt/muster/m1", kopf=schreibe)[0] == 200
+    assert anfrage(s, "GET", "/api/entwurf/werkstatt/muster/m1/seite/1.png", kopf=lese)[0] == 404
