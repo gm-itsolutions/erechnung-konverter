@@ -190,10 +190,11 @@ def test_fehler_mit_vorschlag(k):
     assert len(list(k.fehler.glob("*.pdf"))) == 1 and namen(k.ausgabe) == []
 
 def test_vorschlag_ohne_text(k):
+    k.ocr = lambda p: iter([("psm 6", "nichts Bekanntes")])   # feste Lesart statt Tesseract (fehlt in der CI)
     drucke(k, " ")
     schritt(k)
     txt = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
-    assert "kein Vorschlag" in txt
+    assert txt.startswith("keine Vorlage passt") and "kein Vorschlag: PDF ohne Text" in txt
 
 def test_vorschlag_text_zu_lang(k, monkeypatch):
     from erechnung import ueberwachen
