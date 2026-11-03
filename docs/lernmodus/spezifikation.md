@@ -186,6 +186,8 @@ Zeilen eines Rahmens: Wörter nach Mittelpunkt-y gruppiert (Toleranz: halbe mitt
 - Erkennung: die Oberfläche schlägt als `schluesselwoerter` den Anker der Nummer plus die längste Zeile des oberen Seitenviertels vor; der Benutzer kann sie ändern.
 - Speichern automatisch nach jeder Änderung (`PUT`), Entwürfe dürfen unvollständig sein.
 
+Vorbefüllen: Die generische Erkennung (`erechnung.generisch.vorschlag_aus_pdf`, Messung in `docs/generisch/messung.md`) liefert je Muster einen Vorschlag für Nummer, Datum, Käufer, Positionen und Summen samt Fundstelle (Zeile). Die Oberfläche kann daraus Rahmen vorschlagen; der Benutzer bestätigt oder korrigiert sie. Der Vorschlag ersetzt weder das Markieren noch den Probelauf und erzeugt keine E-Rechnung.
+
 ### 7.3 Probelauf
 
 „Probelauf“ liest **alle** Muster mit dem Entwurf: Werte, Positionen, ignorierte Zeilen, Summenabgleich, Mustang (gegen die erzeugte XML, wie 3.4 Hauptspezifikation), Konfliktprüfung (passt auf ein Muster zusätzlich eine aktive Vorlage → Fehler „mehrere Vorlagen“). Die gefundenen Rahmen liegen grün über dem Seitenbild, nicht gefundene rot. Nummer, Daten und Käufer sichert kein Summenabgleich; deshalb setzt der Benutzer je Muster das Häkchen „Nummer, Datum und Käufer stimmen“.

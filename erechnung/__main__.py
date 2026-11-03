@@ -2,6 +2,23 @@ import argparse, logging, sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from . import __version__
+def _vorschlag(pdf: Path, mit_ocr: bool) -> int:
+    import dataclasses, json, tempfile
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows cp1252 bei umgeleiteter Ausgabe
+    from datetime import date
+    from decimal import Decimal
+    from functools import partial
+    from . import ocr
+    from .generisch import vorschlag_aus_pdf
+    with tempfile.TemporaryDirectory() as arbeit:
+        aufruf = ocr.tesseract() if mit_ocr else None
+        v = vorschlag_aus_pdf(pdf, partial(ocr.erkenne, arbeit=Path(arbeit), aufruf=aufruf) if aufruf else None)
+        d = dataclasses.asdict(v)
+        d["steuern"] = {str(satz): str(basis) for satz, basis in v.steuern.items()}
+        print(json.dumps(d, ensure_ascii=False, indent=2,
+                         default=lambda o: str(o) if isinstance(o, (Decimal, date)) else repr(o)))
+    return 0 if v.bestaetigt else 1
 def main(argv=None, programm_konfig: Path | None = None) -> int:
     """`programm_konfig` ersetzt in Tests die konfig.json des Programmordners (Befehl `vorlage`)."""
     p = argparse.ArgumentParser(prog="erechnung")
@@ -20,6 +37,9 @@ def main(argv=None, programm_konfig: Path | None = None) -> int:
     v.add_argument("--konfig", type=Path, required=True)
     v.add_argument("--benutzer", default="")
     v.add_argument("--ergebnis-id", required=True, help="16 Hex-Zeichen; Datei <Programmordner>\\ergebnisse\\<id>.json")
+    vs = sub.add_parser("vorschlag", help="generische Erkennung als JSON ausgeben (Exit 0 = bestätigt, 1 = nicht)")
+    vs.add_argument("pdf", type=Path)
+    vs.add_argument("--ocr", action="store_true", help="bei PDF ohne Text Tesseract verwenden (falls gefunden)")
     a = p.parse_args(argv)
     if a.version:
         import facturx, lxml, pdfplumber, yaml  # noqa: F401 – Probe: Paket vollständig?
@@ -29,6 +49,8 @@ def main(argv=None, programm_konfig: Path | None = None) -> int:
     if not a.befehl:
         p.print_usage()
         return 2
+    if a.befehl == "vorschlag":
+        return _vorschlag(a.pdf, a.ocr)
     if a.befehl == "anlernen":  # Benutzerkontext: kein Log im Programmordner (nur Admins schreiben dort)
         import os
         from .anlernen import server

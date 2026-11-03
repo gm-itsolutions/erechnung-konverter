@@ -4,7 +4,7 @@ und Gegenprobe, dass der Konverter fremde Layouts sauber abweist.
 Alle Firmen, Personen und Adressen sind frei erfunden. IBANs sind veröffentlichte Test-IBANs,
 USt-IdNr. und Steuernummern Testmuster. Deterministisch (fester Seed): gleiche Ausgabe bei jedem Lauf.
 
-Erzeugen:     /root/.venvs/erechnung/bin/python werkzeuge/fremdrechnungen.py [--ziel DIR] [--layout A ...] [--ohne-bild]
+Erzeugen:     /root/.venvs/erechnung/bin/python werkzeuge/fremdrechnungen.py [--ziel DIR] [--layout A ...] [--ohne-bild] [--varianten N]
 Gegenprobe:   /root/.venvs/erechnung/bin/python werkzeuge/fremdrechnungen.py --gegenprobe [--ziel DIR]
 Je Rechnung <layout>-<n>.pdf und <layout>-<n>.soll.json, je Layout zusätzlich <layout>-1-bild.pdf (200 dpi, ohne Text).
 """
@@ -72,6 +72,18 @@ def summen(posten: list[dict], rabatt_prozent: D | None) -> dict:
     netto = zwischen - rabatt
     return {"zwischensumme": zwischen, "rabatt": rabatt, "netto": netto, "basis": dict(sorted(basis.items())),
             "steuern": steuern, "brutto": netto + sum(steuern.values(), D("0"))}
+
+
+def summen_brutto(posten: list[dict]) -> dict:
+    """Positionen sind Bruttobeträge: Steuer je Satz aus der Bruttosumme herausgerechnet (Satz/(100+Satz))."""
+    brutto_basis = defaultdict(lambda: D("0"))
+    for p in posten:
+        brutto_basis[p["satz"]] += p["netto"]
+    steuern = {s: runde(b * s / (100 + s)) for s, b in sorted(brutto_basis.items())}
+    basis = {s: b - steuern[s] for s, b in sorted(brutto_basis.items())}
+    netto = sum(basis.values(), D("0"))
+    return {"zwischensumme": netto, "rabatt": D("0"), "netto": netto, "basis": basis, "steuern": steuern,
+            "brutto": netto + sum(steuern.values(), D("0"))}
 
 
 # --- Zeichenhilfen (y in mm von oben) ---------------------------------------------------------------------------
@@ -445,6 +457,121 @@ def zeichne_g(c: Canvas, r: dict):
     fuss(c, v, 282)
 
 
+# --- Parametrisierte Layouts H–O (Programmstile über ein Stil-Wörterbuch) ----------------------------------------
+
+def iso(d: date) -> str:
+    return d.isoformat()
+
+
+def tmj_kurz(d: date) -> str:
+    return d.strftime("%d.%m.%y")
+
+
+def monat_kurz(d: date) -> str:
+    return f"{d.day:02d}. {MONATE[d.month - 1][:3]}. {d.year}"
+
+
+def monat_lang(d: date) -> str:
+    return f"{d.day}. {MONATE[d.month - 1]} {d.year}"
+
+
+def eur_hinten(x: D) -> str:
+    return eur(x) + " EUR"
+
+
+def eur_roh(x: D) -> str:
+    """Ohne Tausenderpunkt, Komma als Dezimaltrenner."""
+    return f"{x:.2f}".replace(".", ",")
+
+
+def eur_roh_hinten(x: D) -> str:
+    return eur_roh(x) + " EUR"
+
+
+def seitenzahl_p(n: int, erste: int, folge: int) -> int:
+    return 1 + max(0, -(-(n - erste) // folge))
+
+
+def zelle(key: str, p: dict, i: int, G) -> str:
+    return {"pos": str(i), "artnr": p.get("artnr", ""), "bez": p["bezeichnung"], "menge": zahl(p["menge"]),
+            "me": p["einheit"], "ep": G(p["einzelpreis"]), "rab": f"{zahl(p['rabatt'])} %" if p.get("rabatt") else "",
+            "gesamt": G(p["netto"]), "satz": zahl(p["satz"])}[key]
+
+
+def zeichne_p(c: Canvas, r: dict):
+    """Gemeinsamer Zeichner für H–O: Kopf, Rechnungsdaten, Tabelle (auch mehrseitig), Summenzeilen laut Stil."""
+    st, v, pos = r["stil"], r["v"], r["positionen"]
+    f, fb, g, G, GS = st["font"], st["fontb"], st["gr"], st["geld"], st["geld_sum"]
+    seiten = seitenzahl_p(len(pos), st["erste"], st["folge"])
+    lauf, i = D("0"), 0
+    for seite in range(1, seiten + 1):
+        if seite == 1:
+            if st["kopf"] == "band":
+                c.setFillColorRGB(*st["farbe"])
+                c.rect(0, H - 30 * mm, W, 30 * mm, fill=1, stroke=0)
+                c.setFillGray(1)
+                t(c, 20, 14, v["name"], fb, 15)
+                t(c, 20, 21, f"{v['strasse']} · {v['plz']} {v['ort']} · {v['email']}", f, 8)
+                c.setFillGray(0)
+            elif st["kopf"] == "mitte":
+                t(c, W / mm / 2, 18, v["name"], fb, 14, mitte=True)
+                t(c, W / mm / 2, 24, f"{v['strasse']}, {v['plz']} {v['ort']} – Tel. {v['tel']}", f, 8, mitte=True)
+                linie(c, 20, 27, 190, 27, 0.4)
+            else:
+                t(c, 20, 18, v["name"], fb, 14)
+                zeilen(c, 20, 24, [v["strasse"], f"{v['plz']} {v['ort']}", f"Tel. {v['tel']}"], 3.8, font=f, size=8)
+            zeilen(c, 20, 48, anschrift(r["kaeufer"]), 4.8, font=f, size=g + 1)
+            meta = st["meta"](r)
+            if st["metaform"] == "kasten":
+                kasten(c, 125, 42, 65, 5 + 5 * len(meta))
+                for j, (k, w) in enumerate(meta):
+                    t(c, 128, 48 + j * 5, k, f, g - 0.5)
+                    t(c, 187, 48 + j * 5, w, fb, g - 0.5, rechts=True)
+                y = 48 + 5 * len(meta) + 20
+            else:
+                for j, (k, w) in enumerate(meta):
+                    t(c, 20 + j * 170 / len(meta), 76, k, f, g - 1.5)
+                    t(c, 20 + j * 170 / len(meta), 80.5, w, fb, g)
+                y = 96
+            t(c, 20, y - 5, f"{st['titel']} {st['nr_label']} {r['nummer']}" if st["titel_nr"] else st["titel"], fb, g + 4)
+            for j, z in enumerate(st["vorzeile"](r)):
+                t(c, 20, y + 1 + j * 4.5, z, f, g)
+            y += 5 + 4.5 * len(st["vorzeile"](r))
+            n = st["erste"]
+        else:
+            t(c, 20, 16, f"{v['name']} · {st['nr_label']} {r['nummer']} vom {st['datum'](r['datum'])}", fb, g)
+            linie(c, 20, 19, 190, 19, 0.3)
+            t(c, 120, 28, "Übertrag", f, g)
+            t(c, 190, 28, GS(lauf), f, g, rechts=True)
+            y, n = 38, st["folge"]
+        kasten(c, 20, y - 4.5, 170, 6.5, grau=st.get("kopfgrau", 0.88))
+        for key, titel, x, re in st["spalten"]:
+            t(c, x, y, titel, fb, g - 0.5, rechts=bool(re))
+        y += 7
+        for p in pos[i:i + n]:
+            i += 1
+            for key, titel, x, re in st["spalten"]:
+                t(c, x, y, zelle(key, p, i, G), f, g - 0.5, rechts=bool(re))
+            lauf += p["netto"]
+            y += st["zeile"]
+        linie(c, 20, y - 3.5, 190, y - 3.5, 0.3)
+        if seite < seiten:
+            t(c, 120, y + 1, "Übertrag", f, g)
+            t(c, 190, y + 1, GS(lauf), f, g, rechts=True)
+        else:
+            y += 3
+            for k, w, fett in st["summen"](r["summen"], GS):
+                t(c, 110, y, k, fb if fett else f, g)
+                t(c, 190, y, w, fb if fett else f, g, rechts=True)
+                y += 5.2
+            for j, z in enumerate(st["schluss"](r)):
+                t(c, 20, y + 6 + j * 4.5, z, f, g - 0.5)
+        if seiten > 1:
+            t(c, W / mm / 2, 288, st["seitentext"].format(s=seite, n=seiten), f, 8, mitte=True)
+        fuss(c, v, 280, 6.5)
+        c.showPage()
+
+
 def firma(name, inhaber, strasse, plz, ort, iban, bic, bank, **rest):
     return {"name": name, "inhaber": inhaber, "strasse": strasse, "plz": plz, "ort": ort, "iban": iban, "bic": bic,
             "bank": bank, "tel": "0000 123456", "email": "rechnung@example.org", "ust_id": "DE123456789",
@@ -463,6 +590,47 @@ def _d_katalog():
     var = ["", " grau", " rot", " recycling"]
     return [(f"{b}{z}", e, D(p), D("19"), f"{100 + i * 7:05d}-{j}") for i, (b, e, p) in enumerate(basis)
             for j, z in enumerate(var)]
+
+
+
+def kat(*zeilen_):  # wie katalog, zusätzlich Artikelnummer als 5. Wert
+    return [(b, e, D(pr), D(sz), f"A-{1000 + i * 17}") for i, (b, e, pr, sz) in enumerate(zeilen_)]
+
+
+def _st(**kw):
+    basis = {"font": "Helvetica", "fontb": "Helvetica-Bold", "gr": 9, "geld": eur, "geld_sum": eur, "datum": tmj,
+             "kopf": "einfach", "farbe": (0.2, 0.2, 0.5), "metaform": "kasten", "titel": "Rechnung", "titel_nr": True,
+             "nr_label": "Nr.", "erste": 40, "folge": 40, "zeile": 6, "seitentext": "Seite {s} von {n}",
+             "vorzeile": lambda r: [], "schluss": lambda r: [f"Zahlbar innerhalb von {r['ziel']} Tagen ohne Abzug."]}
+    return {**basis, **kw}
+
+
+def _meta(nr, dat="Datum", extra=()):
+    return lambda r: [(nr, r["nummer"]), (dat, r["stil"]["datum"](r["datum"])), ("Kunden-Nr.", r["kundennr"]),
+                      *[(k, fn(r)) for k, fn in extra]]
+
+
+def _steuerzeilen(fmt):
+    return lambda s, G: [(fmt(sz, s["basis"][sz], st, G), G(st), False) for sz, st in s["steuern"].items()]
+
+
+def _summen_netto(l_netto, fmt, l_brutto):
+    def f(s, G):
+        return [(l_netto, G(s["netto"]), False), *_steuerzeilen(fmt)(s, G), (l_brutto, G(s["brutto"]), True)]
+    return f
+
+
+def _summen_brutto(s, G):
+    return [("Gesamtbetrag brutto", G(s["brutto"]), True), *[(f"darin enthaltene MwSt {zahl(sz)} %", G(st), False)
+            for sz, st in s["steuern"].items()], ("Nettobetrag", G(s["netto"]), False)]
+
+
+def _summen_klein(s, G):
+    return [("Rechnungsbetrag", G(s["brutto"]), True)]
+
+
+SP_VOLL = [("pos", "Pos", 20, 0), ("artnr", "Art.-Nr.", 29, 0), ("bez", "Bezeichnung", 49, 0), ("menge", "Menge", 117, 1),
+           ("me", "ME", 119, 0), ("ep", "EP", 144, 1), ("rab", "Rabatt %", 163, 1), ("gesamt", "Gesamt", 190, 1)]
 
 
 LAYOUTS = {
@@ -526,6 +694,113 @@ LAYOUTS = {
                              ("Obstbaum Halbstamm", "Stk", "79.00", "7"), ("Grünschnittentsorgung", "m³", "28.00", "19"),
                              ("Pflasterarbeiten Gehweg", "m²", "46.50", "19"), ("Blumenzwiebeln Mischung", "Pak", "8.40", "7")),
           "mengen": ["1", "2", "3", "5", "8", "12.5"]},
+    "H": {"titel": "Kassen-/Warenwirtschaftsstil (Courier), Beleg-Nr., ISO-Datum, Positionsrabatt, MwSt 19 % auf …, 19/7 gemischt",
+          "zeichne": zeichne_p, "nummer": lambda n: f"B{260400 + n * 7}", "ziel": 14, "pos": (4, 9), "pos_rabatt": True,
+          "stil": _st(font="Courier", fontb="Courier-Bold", gr=8.5, datum=iso, nr_label="Beleg-Nr.", titel="Beleg",
+                      titel_nr=False, spalten=SP_VOLL, metaform="zeile", zeile=5.5,
+                      meta=_meta("Beleg-Nr.", "Belegdatum"),
+                      summen=_summen_netto("Summe netto", lambda sz, b, st, G: f"MwSt {zahl(sz)} % auf {G(b)}", "Summe brutto")),
+          "v": firma("Getränke Quellmann e.K.", "Inh. Uwe Quellmann", "Dorfplatz 1", "19339", "Brunnwerder", "DE02500105170137075030",
+                     "INGDDEFFXXX", "Musterbank Digital"),
+          "katalog": kat(("Mineralwasser 12x0,7 l", "Kst", "7.49", "19"), ("Apfelsaft naturtrüb 6x1 l", "Kst", "9.90", "19"),
+                         ("Bio-Landbrot 750 g", "Stk", "3.60", "7"), ("Eier Freiland 10er", "Pak", "3.10", "7"),
+                         ("Bier Pils 20x0,5 l", "Kst", "15.99", "19"), ("Kaffee Bohnen 1 kg", "Pak", "13.80", "7"),
+                         ("Pfand Kasten", "Stk", "1.50", "19"), ("Butter 250 g", "Stk", "2.39", "7"),
+                         ("Reinigungsmittel 5 l", "Kan", "11.40", "19")),
+          "mengen": ["1", "2", "3", "6", "10"]},
+    "I": {"titel": "Englische Beschriftung (Invoice No., VAT … on …), ISO-Datum, Beträge mit EUR hinten, Farbband-Kopf",
+          "zeichne": zeichne_p, "nummer": lambda n: f"INV-2026-{1040 + n}", "ziel": 30, "pos": (3, 6),
+          "stil": _st(kopf="band", farbe=(0.55, 0.12, 0.12), datum=iso, geld=eur, geld_sum=eur_hinten, titel="Invoice",
+                      nr_label="No.", metaform="zeile",
+                      spalten=[("pos", "Item", 20, 0), ("bez", "Description", 32, 0), ("menge", "Qty", 118, 1),
+                               ("me", "Unit", 121, 0), ("ep", "Unit price", 156, 1), ("gesamt", "Amount", 190, 1)],
+                      meta=_meta("Invoice No.", "Invoice date", [("Due date", lambda r: iso(r["faellig"]))]),
+                      summen=_summen_netto("Net amount", lambda sz, b, st, G: f"VAT {zahl(sz)} % on {G(b)}", "Total amount due"),
+                      schluss=lambda r: [f"Payment terms: {r['ziel']} days net. Please quote the invoice number."]),
+          "v": firma("Ostsee Marine Supply GmbH", "MD Karsten Brandt", "Kai 4", "17033", "Neuhafenau",
+                     "DE89370400440532013000", "COBADEFFXXX", "Testbank Nord"),
+          "katalog": katalog(("Anchor line 20 m", "pcs", "84.00", "19"), ("Fender set large", "set", "129.50", "19"),
+                             ("Consulting hours", "h", "95.00", "19"), ("Chart table", "pcs", "42.90", "19"),
+                             ("Rigging service", "h", "78.00", "19")),
+          "mengen": ["1", "2", "4", "8"]},
+    "J": {"titel": "„Rechnung Nr.“, Datum TT.MM.JJ, Beträge ohne Tausenderpunkt mit EUR hinten, Steuerzeile „19 % MwSt: …“",
+          "zeichne": zeichne_p, "nummer": lambda n: f"{2026}{n:04d}", "ziel": 14, "pos": (3, 6),
+          "stil": _st(datum=tmj_kurz, geld=eur_roh, geld_sum=eur_roh_hinten, nr_label="Nr.", metaform="kasten",
+                      spalten=[("menge", "Menge", 36, 1), ("me", "Einh.", 39, 0), ("bez", "Bezeichnung", 56, 0),
+                               ("ep", "Einzelpreis", 158, 1), ("gesamt", "Gesamtpreis", 190, 1)],
+                      meta=_meta("Rechnung Nr.", "Datum"),
+                      summen=_summen_netto("Zwischensumme", lambda sz, b, st, G: f"{zahl(sz)} % MwSt:", "Rechnungsbetrag")),
+          "v": firma("Metallbau Oderbruch Pohl", "Dirk Pohl", "Werkstattgasse 6", "15324", "Oderbruch-Nord",
+                     "DE02100500000054540402", "BELADEBEXXX", "Testsparkasse Ost"),
+          "katalog": katalog(("Stahltreppe feuerverzinkt", "Stk", "4890.00", "19"), ("Geländer Edelstahl", "lfm", "212.00", "19"),
+                             ("Schweißarbeiten vor Ort", "Std", "69.00", "19"), ("Carport Konstruktion", "Stk", "3350.00", "19"),
+                             ("Kran und Transport", "psch", "640.00", "19"), ("Stahlträger IPE 200", "lfm", "58.40", "19")),
+          "mengen": ["1", "2", "6", "12"]},
+    "K": {"titel": "Brutto-Positionen mit enthaltener MwSt (Preise inkl.), Datum mit Monatsnamen, Summe darin enthaltener MwSt",
+          "zeichne": zeichne_p, "nummer": lambda n: f"R-{7300 + n * 3}", "ziel": 7, "pos": (3, 7), "brutto": True,
+          "stil": _st(font="Times-Roman", fontb="Times-Bold", gr=10, datum=monat_lang, nr_label="Nr.", metaform="zeile",
+                      spalten=[("pos", "Pos.", 20, 0), ("bez", "Leistung", 32, 0), ("menge", "Anz.", 128, 1),
+                               ("ep", "Preis inkl. MwSt", 158, 1), ("gesamt", "Gesamt inkl.", 190, 1)],
+                      meta=_meta("Rechnungsnummer", "Rechnungsdatum"), summen=_summen_brutto,
+                      vorzeile=lambda r: ["Alle Preise verstehen sich inklusive der gesetzlichen Mehrwertsteuer."]),
+          "v": firma("Café & Bistro Seeblick", "Hanna Wöhler", "Uferpromenade 9", "17192", "Binnenufer",
+                     "DE02300209000106531065", "CMCIDEDDXXX", "Beispielbank West"),
+          "katalog": katalog(("Catering Buffet pro Person", "Pers", "24.50", "7"), ("Getränkepauschale", "Pers", "11.90", "19"),
+                             ("Saalmiete", "psch", "250.00", "19"), ("Torte nach Wunsch", "Stk", "68.00", "7"),
+                             ("Servicepersonal", "Std", "29.00", "19"), ("Blumendeko Tische", "psch", "85.00", "19")),
+          "mengen": ["1", "2", "20", "35", "50"]},
+    "L": {"titel": "Gutschrift (Storno) mit Bezug auf eine Rechnung, negative Mengen und Beträge",
+          "zeichne": zeichne_p, "nummer": lambda n: f"GS-26-{120 + n}", "ziel": 14, "pos": (2, 4), "gutschrift": True,
+          "stil": _st(titel="Gutschrift", nr_label="Nr.", metaform="kasten",
+                      spalten=[("pos", "Pos", 20, 0), ("bez", "Bezeichnung", 30, 0), ("menge", "Menge", 120, 1),
+                               ("ep", "Einzelpreis", 154, 1), ("gesamt", "Betrag", 190, 1)],
+                      meta=_meta("Gutschrift-Nr.", "Datum"),
+                      vorzeile=lambda r: [f"Gutschrift zu Rechnung {r['bezug_nummer']} vom {tmj(r['bezug_datum'])}"],
+                      summen=_summen_netto("Gutschrift netto", lambda sz, b, st, G: f"MwSt {zahl(sz)} % auf {G(b)}",
+                                           "Gutschriftbetrag"),
+                      schluss=lambda r: ["Der Betrag wird mit Ihrer nächsten Rechnung verrechnet oder erstattet."]),
+          "v": firma("Funk & Sicherheit Dommer GmbH", "GF Ines Dommer", "Antennenstraße 3", "19288", "Antennenaue",
+                     "DE02120300000000202051", "BYLADEM1001", "Testbank Mitte"),
+          "katalog": katalog(("Funkmelder Rauch", "Stk", "39.90", "19"), ("Montage Melder", "Std", "64.00", "19"),
+                             ("Zentrale Alarm 8 Zonen", "Stk", "412.00", "19"), ("Wartungsvertrag Quartal", "psch", "180.00", "19")),
+          "mengen": ["1", "2", "3"]},
+    "M": {"titel": "Tabelle Pos|Art.-Nr.|Bezeichnung|Menge|ME|EP|Rabatt %|Gesamt, Datum „02. Nov. 2026“, Rechnung Nr., Positionsrabatt, 19/7 gemischt",
+          "zeichne": zeichne_p, "nummer": lambda n: f"RE-26-{3100 + n}", "ziel": 21, "pos": (5, 9), "pos_rabatt": True,
+          "stil": _st(kopf="mitte", datum=monat_kurz, nr_label="Nr.", spalten=SP_VOLL, metaform="kasten",
+                      meta=_meta("Rechnung Nr.", "Datum", [("Lieferschein", lambda r: r["lieferschein"])]),
+                      summen=_summen_netto("Nettosumme", lambda sz, b, st, G: f"zzgl. {zahl(sz)} % MwSt auf {G(b)}",
+                                           "Zahlbetrag")),
+          "v": firma("Agrarhandel Sandfeld GmbH", "GF Frank Lemke", "Silostraße 11", "16928", "Sandfelde",
+                     "DE89370400440532013000", "COBADEFFXXX", "Testbank Nord"),
+          "katalog": kat(("Saatgut Raps 25 kg", "Sack", "168.00", "7"), ("Düngemittel NPK 50 kg", "Sack", "42.50", "19"),
+                         ("Pflanzenschutz 10 l", "Kan", "96.80", "19"), ("Futtergerste 1 t", "t", "215.00", "7"),
+                         ("Strohballen Rund", "Stk", "28.00", "7"), ("Silofolie 12x50 m", "Rol", "184.00", "19"),
+                         ("Arbeitshandschuhe", "Paar", "6.90", "19"), ("Weidezaundraht 250 m", "Rol", "39.90", "19"),
+                         ("Mineralfutter 25 kg", "Sack", "31.40", "7")),
+          "mengen": ["1", "4", "10", "24"]},
+    "N": {"titel": "Mehrseitig (Blatt x/y), wenige Positionen je Seite, Übertrag, Beträge mit EUR hinten, Positionsrabatt",
+          "zeichne": zeichne_p, "nummer": lambda n: f"{n:03d}/2026", "ziel": 30, "pos": (26, 34), "pos_rabatt": True,
+          "stil": _st(kopf="band", farbe=(0.1, 0.1, 0.1), geld=eur, geld_sum=eur_hinten, nr_label="Nr.", spalten=SP_VOLL,
+                      metaform="zeile", erste=14, folge=22, zeile=7.5, seitentext="Blatt {s}/{n}",
+                      meta=_meta("Rechnungsnr.", "Rechnungsdatum"),
+                      summen=_summen_netto("Netto", lambda sz, b, st, G: f"MwSt {zahl(sz)} % auf {G(b)}", "Brutto")),
+          "v": firma("Heizung Sanitär Wegener & Söhne", "Bernd Wegener", "Kesselstraße 27", "14727", "Kesselheide",
+                     "DE02300209000106531065", "CMCIDEDDXXX", "Beispielbank West"),
+          "katalog": _d_katalog(),
+          "mengen": ["1", "2", "5", "10"]},
+    "O": {"titel": "Kleinunternehmer § 19 UStG im Tabellenstil, ISO-Datum, EUR hinten, ohne Tausenderpunkt, Satz 0",
+          "zeichne": zeichne_p, "nummer": lambda n: f"{2026}-K{n:03d}", "ziel": 10, "pos": (2, 5),
+          "stil": _st(datum=iso, geld=eur_roh, geld_sum=eur_roh_hinten, nr_label="Nr.", metaform="zeile",
+                      spalten=[("pos", "Pos", 20, 0), ("bez", "Leistung", 30, 0), ("menge", "Menge", 120, 1),
+                               ("ep", "Preis", 154, 1), ("gesamt", "Summe", 190, 1)],
+                      meta=_meta("Rechnungs-Nr.", "Rechnungsdatum"), summen=_summen_klein,
+                      vorzeile=lambda r: ["Kleinunternehmer gemäß § 19 UStG, es wird keine Umsatzsteuer ausgewiesen."]),
+          "v": firma("Webdesign Tilda Rehm", "Tilda Rehm", "Fliederweg 14", "16866", "Kyritz-Ausbau",
+                     "DE02100500000054540402", "BELADEBEXXX", "Testsparkasse Ost"),
+          "katalog": katalog(("Webseite Relaunch 5 Seiten", "psch", "1850.00", "0"), ("Pflege Webseite", "Std", "55.00", "0"),
+                             ("Logo Entwurf", "psch", "420.00", "0"), ("Hosting Jahresgebühr", "Jahr", "120.00", "0"),
+                             ("Schulung Redakteure", "Std", "70.00", "0")),
+          "mengen": ["1", "2", "3", "8"]},
 }
 ERWARTET_LERNMODUS = {
     "A": "anlernbar (Bezeichnung teils zweizeilig)",
@@ -535,6 +810,14 @@ ERWARTET_LERNMODUS = {
     "E": "anlernbar; Nachlass auf Rechnungsebene, Lieferanschrift darf nicht als Käufer gelesen werden",
     "F": "nicht anlernbar: Satz 0 / § 19 UStG wird nicht unterstützt (Schema ust_satz 0 < x <= 30)",
     "G": "anlernbar; Nummer mit / und -, Datum TT.MM.JJ, faellig statt zahlungsziel_tage",
+    "H": "anlernbar; Positionsrabatt-Spalte, Steuerzeile „MwSt 19 % auf …“, ISO-Datum, Beleg-Nr.",
+    "I": "Fehler erwartet: englische Beschriftung, Steuerzeile „VAT … on …“",
+    "J": "anlernbar; Beträge ohne Tausenderpunkt, Steuerzeile nur „19 % MwSt:“ ohne Basis",
+    "K": "Fehler erwartet: Positionen brutto (Preise inkl. MwSt), Netto nur als Rückrechnung",
+    "L": "Fehler erwartet: Gutschrift mit negativen Beträgen (art gutschrift)",
+    "M": "anlernbar; Datum mit abgekürztem Monatsnamen, Positionsrabatt, 19/7 gemischt",
+    "N": "anlernbar; Blatt x/y, Übertrag, bis zu 3 Seiten",
+    "O": "nicht anlernbar: Satz 0 / § 19 UStG (Schema ust_satz 0 < x <= 30)",
 }
 
 
@@ -548,8 +831,14 @@ def rechnung(layout: str, n: int, rng: random.Random) -> dict:
         menge = D(rng.choice(L["mengen"]))
         if einheit not in TEILBAR:
             menge = menge.to_integral_value(rounding=ROUND_CEILING)
+        if L.get("gutschrift"):
+            menge = -menge
         p = {"bezeichnung": bez, "menge": menge, "einheit": einheit, "einzelpreis": ep,
              "netto": runde(menge * ep), "satz": satz}
+        if L.get("pos_rabatt"):
+            rab = D(rng.choice(["0", "0", "5", "10", "15"]))
+            if rab:
+                p["rabatt"], p["netto"] = rab, runde(menge * ep * (100 - rab) / 100)
         if len(eintrag) > 4:
             p["artnr"] = eintrag[4]
         posten.append(p)
@@ -558,12 +847,14 @@ def rechnung(layout: str, n: int, rng: random.Random) -> dict:
         p["menge"], p["netto"] = D("2.5"), runde(D("2.5") * p["einzelpreis"])
     ziel = L.get("ziel")
     faellig = datum_ + timedelta(days=ziel or L["faellig_tage"])
-    return {"layout": layout, "v": L["v"], "nummer": L["nummer"](n), "datum": datum_,
+    bezug = {"bezug_nummer": f"RE-{rng.randrange(1000, 9999)}", "bezug_datum": datum_ - timedelta(days=rng.randrange(20, 60))} \
+        if L.get("gutschrift") else {}
+    return {**bezug, "layout": layout, "v": L["v"], "nummer": L["nummer"](n), "datum": datum_, "stil": L.get("stil"),
             "leistungsdatum": datum_ - timedelta(days=rng.randrange(1, 10)), "faellig": faellig, "ziel": ziel,
             "kaeufer": rng.choice(KUNDEN), "lieferort": rng.choice(LIEFERORTE) if layout == "E" else None,
             "kundennr": f"K{rng.randrange(10000, 99999)}", "lieferschein": f"LS-{rng.randrange(1000, 9999)}",
             "positionen": posten, "rabatt_prozent": L.get("rabatt"),
-            "summen": summen(posten, L.get("rabatt"))}
+            "summen": summen_brutto(posten) if L.get("brutto") else summen(posten, L.get("rabatt"))}
 
 
 def pdf(r: dict) -> bytes:
@@ -572,7 +863,7 @@ def pdf(r: dict) -> bytes:
     c.setTitle(f"Rechnung {r['nummer']}")
     c.setAuthor(r["v"]["name"])
     LAYOUTS[r["layout"]]["zeichne"](c, r)
-    if r["layout"] != "D":   # D schließt jede Seite selbst ab
+    if r["layout"] != "D" and not r["stil"]:   # D und H–O schließen jede Seite selbst ab
         c.showPage()
     c.save()
     return puffer.getvalue()
@@ -593,8 +884,10 @@ def bild_pdf(daten: bytes, dpi: int = BILD_DPI) -> bytes:
 def soll(r: dict, datei: str, bild: bool, seiten: int) -> dict:
     s, txt = r["summen"], str
     pos = [{"bezeichnung": p["bezeichnung"], "menge": txt(p["menge"]), "einheit": p["einheit"] or None,
-            "einzelpreis": txt(p["einzelpreis"]), "netto": txt(p["netto"]), "satz": txt(p["satz"])}
+            "einzelpreis": txt(p["einzelpreis"]), "netto": txt(p["netto"]), "satz": txt(p["satz"]),
+            **({"rabatt_prozent": txt(p["rabatt"])} if p.get("rabatt") else {})}
            for p in r["positionen"]]
+    L = LAYOUTS[r["layout"]]
     return {"datei": datei, "layout": r["layout"], "layout_beschreibung": LAYOUTS[r["layout"]]["titel"],
             "bild_pdf": bild, "seiten": seiten, "nummer": r["nummer"], "datum": r["datum"].isoformat(),
             "leistungsdatum": r["leistungsdatum"].isoformat(), "faellig": r["faellig"].isoformat(),
@@ -603,23 +896,37 @@ def soll(r: dict, datei: str, bild: bool, seiten: int) -> dict:
             "rabatt": {"prozent": txt(r["rabatt_prozent"]), "betrag": txt(s["rabatt"])} if s["rabatt"] else None,
             "netto": txt(s["netto"]), "steuern": {txt(k): txt(v) for k, v in s["steuern"].items()},
             "brutto": txt(s["brutto"]),
+            "art": "gutschrift" if L.get("gutschrift") else "rechnung",
+            "brutto_positionen": bool(L.get("brutto")),   # true: einzelpreis/netto der Positionen sind Bruttobeträge
+            "sprache": "en" if r["layout"] == "I" else "de",
+            **({"bezug_nummer": r["bezug_nummer"], "bezug_datum": r["bezug_datum"].isoformat()}
+               if "bezug_nummer" in r else {}),
             "erwartet_heute": {"ergebnis": "fehler", "meldung_enthaelt": "keine Vorlage passt"},
             "erwartet_lernmodus": ERWARTET_LERNMODUS[r["layout"]]}
 
 
-def erzeuge(ziel: Path, layouts=None, bild: bool = True, seed: int = SEED) -> list[Path]:
+def seitenzahl(r: dict) -> int:
+    n = len(r["positionen"])
+    if r["layout"] == "D":
+        return d_seiten(n)
+    return seitenzahl_p(n, r["stil"]["erste"], r["stil"]["folge"]) if r["stil"] else 1
+
+
+def erzeuge(ziel: Path, layouts=None, bild: bool = True, seed: int = SEED, varianten: int = 0) -> list[Path]:
+    """Je Layout ANZAHL Exemplare + Bild-PDF des ersten; `varianten` weitere Exemplare (gleicher Seed-Strom, die
+    ersten ANZAHL bleiben dadurch unverändert)."""
     ziel.mkdir(parents=True, exist_ok=True)
     dateien = []
     for layout in layouts or LAYOUTS:
         rng = random.Random(f"{seed}-{layout}")
-        for n in range(1, ANZAHL + 1):
+        for n in range(1, ANZAHL + varianten + 1):
             r = rechnung(layout, n, rng)
             daten = pdf(r)
-            seiten = d_seiten(len(r["positionen"])) if layout == "D" else 1
-            varianten = [(f"{layout}-{n}", daten, False)]
+            seiten = seitenzahl(r)
+            ausgaben = [(f"{layout}-{n}", daten, False)]
             if bild and n == 1:
-                varianten.append((f"{layout}-{n}-bild", bild_pdf(daten), True))
-            for stamm, inhalt, ist_bild in varianten:
+                ausgaben.append((f"{layout}-{n}-bild", bild_pdf(daten), True))
+            for stamm, inhalt, ist_bild in ausgaben:
                 (ziel / f"{stamm}.pdf").write_bytes(inhalt)
                 (ziel / f"{stamm}.soll.json").write_text(
                     json.dumps(soll(r, f"{stamm}.pdf", ist_bild, seiten), ensure_ascii=False, indent=2) + "\n",
@@ -659,9 +966,10 @@ if __name__ == "__main__":
     a.add_argument("--ziel", type=Path, default=ZIEL)
     a.add_argument("--layout", nargs="*", choices=sorted(LAYOUTS))
     a.add_argument("--ohne-bild", action="store_true")
+    a.add_argument("--varianten", type=int, default=0, help="zusätzliche Exemplare je Layout (großer Korpus)")
     a.add_argument("--gegenprobe", action="store_true")
     x = a.parse_args()
     if x.gegenprobe:
         sys.exit(gegenprobe(x.ziel))
-    for d in erzeuge(x.ziel, x.layout, not x.ohne_bild):
+    for d in erzeuge(x.ziel, x.layout, not x.ohne_bild, varianten=x.varianten):
         print(d)
