@@ -60,9 +60,11 @@ def _ein_muster(pdf: Path, v: dict, andere: list[dict], k) -> dict:
         xml = erzeuge_cii(r, summenabgleich(r))
         if not k.pruefe:
             raise ValueError("Mustang-Prüfung nicht verfügbar")
-        datei = k.arbeit / f"probe-{pdf.stem}.xml"
-        datei.write_bytes(xml)
+        fd, name = tempfile.mkstemp(dir=k.arbeit, prefix=f"probe-{pdf.stem}-", suffix=".xml")   # eindeutig: parallele Probeläufe
+        datei = Path(name)
         try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(xml)
             erg["mustang"] = k.pruefe(datei)
         finally:
             datei.unlink(missing_ok=True)

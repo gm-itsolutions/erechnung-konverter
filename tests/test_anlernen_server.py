@@ -136,3 +136,11 @@ def test_cli_anlernen_ohne_log_im_programmordner(tmp_path, monkeypatch):
     daten = tmp_path / "lokal" / "GM-IT" / "erechnung-konverter" / "anlernen"
     assert aufrufe == [(konfig, daten)] and (daten / "anlernen.log").exists()
     assert not (tmp_path / "prog" / "erechnung.log").exists()
+def test_cli_anlernen_startfehler_im_log(tmp_path, monkeypatch, caplog):
+    def kaputt(konfig, daten=None):
+        raise ValueError("konfig kaputt")
+    monkeypatch.setattr(srv, "starte", kaputt)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "lokal"))
+    monkeypatch.setattr(cli.logging, "basicConfig", lambda handlers, **_: [x.close() for x in handlers])
+    assert cli.main(["anlernen", "--konfig", str(tmp_path / "konfig.json")]) == 1
+    assert "Start fehlgeschlagen" in caplog.text and "konfig kaputt" in caplog.text

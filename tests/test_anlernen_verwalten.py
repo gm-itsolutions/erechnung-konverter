@@ -196,3 +196,11 @@ def test_aktivieren_prueft_kopie(umgebung, monkeypatch):
     assert aktivieren(e, konfig, "kasse")["ok"] is True
     datei = konfig.parent / "vorlagen" / "angelernt" / "test-bereiche.yml"
     assert pruefe_bereichsvorlage(yaml.safe_load(datei.read_text(encoding="utf-8")))["name"] == "test-bereiche"
+def test_probelauf_xml_name_eindeutig(umgebung):
+    e, k, _ = umgebung
+    namen = []
+    k.pruefe = lambda xml: namen.append(xml.name) or "valid (Test)"
+    probelauf(e, k)
+    probelauf(e, k)
+    assert len(set(namen)) == 4 and all(n.startswith("probe-m") and n.endswith(".xml") for n in namen)
+    assert list(k.arbeit.iterdir()) == []

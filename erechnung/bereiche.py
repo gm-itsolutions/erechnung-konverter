@@ -206,7 +206,7 @@ def _datum(t: str) -> date:
     j = int(m[3]) + (2000 if len(m[3]) == 2 else 0)
     return date(j, int(m[2]), int(m[1]))
 def _tage(t: str) -> int:
-    m = re.search(r"\d{1,3}", t)
+    m = re.search(r"(?<!\d)\d{1,3}(?!\d)", t)   # „1000“ ist kein Zahlungsziel
     if not m or not 1 <= int(m[0]) <= 365:
         raise ValueError(f"keine Tageszahl in {t!r}")
     return int(m[0])

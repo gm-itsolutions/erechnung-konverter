@@ -36,7 +36,11 @@ def main(argv=None, programm_konfig: Path | None = None) -> int:
         daten.mkdir(parents=True, exist_ok=True)
         h = RotatingFileHandler(daten / "anlernen.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
         logging.basicConfig(level=logging.INFO, handlers=[h], format="%(asctime)s %(levelname)s %(message)s")
-        server.starte(a.konfig, daten)
+        try:
+            server.starte(a.konfig, daten)
+        except Exception:   # unter pythonw sonst unsichtbar
+            logging.getLogger("erechnung.anlernen").exception("Start fehlgeschlagen")
+            return 1
         return 0
     if a.befehl == "vorlage":
         return _vorlage(a, programm_konfig)

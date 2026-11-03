@@ -53,3 +53,9 @@ def test_kaeufer_fehlt(tmp_path):
     del v["felder"]["kaeufer"]
     with pytest.raises(BereichsFehler, match="kaeufer"):
         kopf_aus_bereichen(seiten_aus(tmp_path, werkstatt_pdf(MUSTER1, SUMMEN1)), v)
+def test_tage_ganze_zahl():
+    from erechnung.bereiche import _tage
+    assert _tage("Zahlbar in 14 Tagen") == 14
+    for t in ("Zahlbar in 1000 Tagen", "Zahlbar in 0 Tagen"):
+        with pytest.raises(ValueError):
+            _tage(t)

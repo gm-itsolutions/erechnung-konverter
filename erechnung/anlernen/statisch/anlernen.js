@@ -3,8 +3,13 @@
 // Kein Framework, kein Inline-Code (CSP); Farben nur aus den Tokens in gm.css.
 const CSRF = document.querySelector('meta[name="csrf"]').content;
 async function api(methode, pfad, body, typ = "application/json", kopf = {}) {
-  const r = await fetch(pfad, {method: methode, headers: methode === "GET" ? {} : {"X-CSRF": CSRF, "Content-Type": typ, ...kopf},
-    body: body === undefined ? undefined : (typ === "application/json" ? JSON.stringify(body) : body)});
+  let r;
+  try {
+    r = await fetch(pfad, {method: methode, headers: methode === "GET" ? {} : {"X-CSRF": CSRF, "Content-Type": typ, ...kopf},
+      body: body === undefined ? undefined : (typ === "application/json" ? JSON.stringify(body) : body)});
+  } catch {   // Server beendet (Leerlauf, „Beenden“): sonst englisches „Failed to fetch“
+    throw new Error("Verbindung zum Anlern-Programm unterbrochen – bitte über das Startmenü neu öffnen.");
+  }
   const t = r.headers.get("Content-Type") || "";
   const daten = t.startsWith("application/json") ? await r.json() : await r.blob();
   if (!r.ok) throw new Error(daten.fehler || `Fehler ${r.status}`);
@@ -69,8 +74,8 @@ const NAME = /^[a-z0-9][a-z0-9-]{1,39}$/;
 // ---------- Zustand ----------
 const S = {stand: null, name: null, vorlage: null, muster: [], aktiv: null, seite: 1, gen: 0,
   wp: {}, woerter: {}, werte: {}, uiSeite: {}, posOben: null, modus: null, zug: null, hover: null, timer: null,
-  probe: null, probeNr: 0, spur: null, uac: null, erfolg: null};   // probe: {laeuft} | {ergebnis, haken}; uac: wartende Aktion
-const UAC_HINWEIS = "Windows fragt gleich nach einem Administrator-Konto. Ohne Freigabe bleibt die Vorlage inaktiv. "
+  probe: null, probeNr: 0, probeOffen: false, spur: null, uac: null, erfolg: null};   // probe: {laeuft} | {ergebnis, haken}; uac: wartende Aktion
+const uacHinweis = (folge) => `Windows fragt gleich nach einem Administrator-Konto. Ohne Freigabe ${folge}. `
   + "Unter „Details“ muss als Befehlszeile „-m erechnung vorlage …“ stehen, sonst „Nein“ wählen.";
 const UAC_WARTEN = "Warte auf die Administrator-Freigabe in Windows …";
 const $ = (id) => document.getElementById(id);
@@ -128,7 +133,7 @@ function renderVorlagen() {
   $("vorlagen-leer").hidden = st.aktiv.length + st.deaktiviert.length + st.entwuerfe.length > 0;
   const uac = $("vorlagen-uac");
   uac.hidden = !(st.aktiv.length + st.deaktiviert.length);
-  uac.textContent = aus ? UAC_WARTEN : `Deaktivieren, Reaktivieren und Löschen: ${UAC_HINWEIS}`;
+  uac.textContent = aus ? UAC_WARTEN : `Deaktivieren, Reaktivieren und Löschen: ${uacHinweis("bleibt alles unverändert")}`;
 }
 async function verwalten(name, aktion) {   // jede Verwaltungsaktion geht über UAC (F1), auch Löschen deaktivierter
   if (aktion === "loeschen" && !confirm(`Vorlage „${name}“ endgültig löschen? Rechnungen in diesem Layout landen danach wieder im Fehler-Ordner.`)) return;
@@ -139,7 +144,7 @@ async function verwalten(name, aktion) {   // jede Verwaltungsaktion geht über 
     r = await api("POST", `/api/vorlage/${encodeURIComponent(name)}/${aktion}`, {});
   } finally {
     S.uac = null;
-    await ladeStand();
+    try { await ladeStand(); } catch (e) { renderVorlagen(); }   // Ergebnis der Aktion nicht verdecken
   }
   meldung(r.meldung, r.ok ? "ok" : "err");
 }
@@ -608,20 +613,27 @@ function probeZurueck() {   // Vorlage oder Muster geändert: Ergebnis und laufe
   renderProbe();
 }
 async function probelauf() {
-  await speichernJetzt();
-  const nr = S.probeNr + 1, name = S.name;
-  S.probeNr = nr;
-  S.probe = {laeuft: true};
-  S.spur = null;
-  renderProbe();
-  zeichne();
+  if (S.probeOffen) return;
+  S.probeOffen = true;   // Knopf gesperrt, bis der Request zurück ist – auch wenn probeZurueck() das Ergebnis schon verworfen hat
+  renderKopf();
   try {
-    // läuft synchron auf dem Server, bei Bild-PDFs mit Texterkennung auch Minuten: bewusst ohne Zeitgrenze
-    const ergebnis = await api("POST", `/api/entwurf/${encodeURIComponent(name)}/probelauf`, {});
-    if (nr === S.probeNr && name === S.name) zeigeProbelauf(ergebnis);
-  } catch (e) {
-    if (nr === S.probeNr && name === S.name) { S.probe = null; renderProbe(); }
-    throw e;
+    await speichernJetzt();
+    const nr = S.probeNr + 1, name = S.name;
+    S.probeNr = nr;
+    S.probe = {laeuft: true};
+    S.spur = null;
+    renderProbe();
+    zeichne();
+    try {
+      // läuft synchron auf dem Server, bei Bild-PDFs mit Texterkennung auch Minuten: bewusst ohne Zeitgrenze
+      const ergebnis = await api("POST", `/api/entwurf/${encodeURIComponent(name)}/probelauf`, {});
+      if (nr === S.probeNr && name === S.name) zeigeProbelauf(ergebnis);
+    } catch (e) {
+      if (nr === S.probeNr && name === S.name) { S.probe = null; renderProbe(); throw e; }   // veralteter Lauf: still
+    }
+  } finally {
+    S.probeOffen = false;
+    renderKopf();
   }
 }
 const euro = (b) => `${b} €`;
@@ -670,10 +682,10 @@ function renderKopf() {
   const p = S.probe, e = p && p.ergebnis, laeuft = !!(p && p.laeuft), wartet = S.uac !== null;
   const alle = e && e.muster.filter(m => m.ok).every(m => p.haken.has(m.id));
   $("probelauf").hidden = !!e;
-  $("probelauf").disabled = laeuft || !S.name;
+  $("probelauf").disabled = laeuft || S.probeOffen || !S.name;
   $("probelauf").textContent = laeuft ? "Probelauf läuft …" : "Probelauf";
   $("probe-wiederholen").hidden = !e;
-  $("probe-wiederholen").disabled = wartet;
+  $("probe-wiederholen").disabled = wartet || S.probeOffen;
   $("aktivieren").hidden = !e;
   $("aktivieren").disabled = !(e && e.bereit && alle) || wartet;
   $("aktivieren").textContent = wartet ? "Warte auf Freigabe …" : "Vorlage aktivieren";
@@ -695,7 +707,7 @@ function renderProbe() {
   const ok = e.muster.filter(m => m.ok).length, n = e.muster.length;
   $("probe-titel").textContent = `Probelauf: ${ok} von ${n} ${n === 1 ? "Muster" : "Mustern"} bestanden` + (n < 2 ? " · mindestens 2 Muster nötig" : "");
   box.replaceChildren(
-    e.bereit ? el("div", {class: "alert info"}, S.uac !== null ? UAC_WARTEN : UAC_HINWEIS) : null,
+    e.bereit ? el("div", {class: "alert info"}, S.uac !== null ? UAC_WARTEN : uacHinweis("bleibt die Vorlage inaktiv")) : null,
     ...e.muster.map(musterKarte));
 }
 async function aktivieren() {
