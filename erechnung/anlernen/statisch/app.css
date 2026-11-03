@@ -1,6 +1,8 @@
 /* E-Rechnung anlernen – Ergänzungen zu gm.css, nur Tokens (50-vorlagen/webui/README.md). */
 [hidden]{ display:none!important; }
 .unsichtbar{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.feld-titel{ font-weight:500; margin-bottom:.3rem; }
+.datei:focus-visible + label{ outline:2px solid var(--amber); outline-offset:2px; }   /* verstecktes Datei-Feld: Fokus am Knopf zeigen */
 .sidebar .beenden{ color:var(--on-navy); border-color:var(--navy-3); }
 .kopf-aktionen{ margin:0; }
 .beendet{ min-height:100vh; display:grid; place-items:center; background:var(--navy); color:var(--on-navy); }

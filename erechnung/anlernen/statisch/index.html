@@ -75,8 +75,9 @@
               <ul class="liste" id="muster-liste"></ul>
               <div class="empty klein" id="muster-leer">Noch kein Muster. Eine Rechnung in diesem Layout hinzufügen, besser zwei (Original und Druck über „E-Rechnung“).</div>
               <div class="field">
-                <label for="muster-datei">Datei hinzufügen</label>
-                <input type="file" id="muster-datei" accept="application/pdf">
+                <div class="feld-titel">Datei hinzufügen</div>
+                <input type="file" id="muster-datei" class="unsichtbar datei" accept="application/pdf">
+                <label for="muster-datei" class="btn btn-secondary">PDF auswählen</label>
               </div>
               <div class="field">
                 <label for="muster-fehler">Aus Fehler-Ordner übernehmen</label>

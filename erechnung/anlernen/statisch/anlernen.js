@@ -19,11 +19,17 @@ const mitteY = (w) => (w[2] + w[4]) / 2;           // w = [text, x0, top, x1, bo
 function umriss(ws) {
   return [r4(Math.min(...ws.map(w => w[1]))), r4(Math.min(...ws.map(w => w[2]))), r4(Math.max(...ws.map(w => w[3]))), r4(Math.max(...ws.map(w => w[4])))];
 }
-const veraenderlich = (w) => /\d[.,]\d/.test(w[0]);   // Beträge und Daten ändern sich je Rechnung: nie Anker
+function satzWort(w, woerter) {   // „19“, „19,00“, „7%“ direkt vor „%“: wird in satzPlatzhalter zu {satz}, bleibt Anker
+  if (!/^\d{1,2}(?:[.,]\d{1,2})?%?$/.test(w[0])) return false;
+  return w[0].endsWith("%") || woerter.some(v => v[0].startsWith("%") && Math.abs(mitteY(v) - mitteY(w)) < (w[4] - w[2]) / 2
+    && v[1] >= w[3] - 0.002 && v[1] - w[3] < 0.02);
+}
+// Beträge, Daten und Kennungen (BW-2026-17) ändern sich je Rechnung: nie Anker; Steuersätze ausgenommen
+const veraenderlich = (w, woerter) => !satzWort(w, woerter) && (/\d[.,]\d/.test(w[0]) || (w[0].match(/\d/g) || []).length >= 3);
 function ankerVorschlag(rahmen, woerter) {
   // 1. Wörter links vom Rahmen in derselben Zeile (zusammenhängend, höchstens 4, Lücke < 0,03)
   const [x0, y0, , y1] = rahmen;
-  woerter = woerter.filter(w => !veraenderlich(w));
+  woerter = woerter.filter(w => !veraenderlich(w, woerter));
   const links = woerter.filter(w => mitteY(w) >= y0 && mitteY(w) <= y1 && w[3] <= x0 + 0.002).sort((a, b) => b[1] - a[1]);
   const kette = [];
   for (const w of links) {
@@ -619,7 +625,14 @@ function verbinde() {
   $("neu-name").addEventListener("keydown", (ev) => { if (ev.key === "Enter") mitMeldung(neueVorlage); });
   $("beenden").addEventListener("click", () => mitMeldung(beenden));
   window.addEventListener("hashchange", zeigeAnsicht);
-  window.addEventListener("beforeunload", () => { if (S.timer !== null) speichernJetzt(); });
+  window.addEventListener("beforeunload", () => {   // keepalive: das PUT überlebt das Schließen des Fensters
+    if (S.timer === null) return;
+    clearTimeout(S.timer);
+    S.timer = null;
+    vorschlagErkennung();
+    fetch(`/api/entwurf/${S.name}`, {method: "PUT", keepalive: true, headers: {"X-CSRF": CSRF, "Content-Type": "application/json"},
+      body: JSON.stringify(S.vorlage)});
+  });
 }
 verbinde();
 zeigeAnsicht();
