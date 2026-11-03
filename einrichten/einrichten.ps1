@@ -65,7 +65,14 @@ if ($KonfigErsetzen -or -not (Test-Path -LiteralPath $ziel)) {
   foreach ($n in $ordner.Keys) { $k | Add-Member -Force -NotePropertyName $n -NotePropertyValue (Join-Path $Daten $ordner[$n]) }
   [IO.File]::WriteAllText($ziel, ($k | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
 }
-New-Item -ItemType Directory -Force -Path (Join-Path $prog 'arbeit'), (Join-Path $prog 'vorlagen') | Out-Null
+# Lernmodus: angelernte Vorlagen und Ergebnisse des Administrator-Laufs. Rechte werden geerbt (Program Files:
+# Benutzer lesen, nur Administratoren/SYSTEM schreiben) und hier bewusst nicht verändert.
+$angelernt = Join-Path $prog 'vorlagen\angelernt'
+$lernordner = @((Join-Path $prog 'vorlagen'), $angelernt, (Join-Path $angelernt 'deaktiviert'), (Join-Path $prog 'ergebnisse'))
+foreach ($p in $lernordner) { Pruefe-KeineVerknuepfung $p }
+New-Item -ItemType Directory -Force -Path (Join-Path $prog 'arbeit') | Out-Null
+New-Item -ItemType Directory -Force -Path $lernordner | Out-Null
+foreach ($p in $lernordner) { Pruefe-KeineVerknuepfung $p }
 
 # 3. Drucker "E-Rechnung" auf Dateiport
 if (-not (Get-PrinterDriver -Name 'Microsoft Print to PDF' -ErrorAction SilentlyContinue)) {
@@ -96,6 +103,21 @@ foreach ($pr in $profilordner) {
   $lnk.Save()
 }
 
+# 4b. Startmenü "E-Rechnung anlernen" für alle Benutzer (Lernmodus, läuft im Benutzerkontext, docs/lernmodus/spezifikation.md 3.2).
+#     ProgramData wie ProgramFilesDir aus HKLM lesen, nicht aus der Umgebung des Aufrufers.
+$pd = $hklm.OpenSubKey('SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList').GetValue('ProgramData')
+if (-not $pd) { throw 'ProgramData in HKLM nicht lesbar - abgebrochen.' }
+$startmenue = Join-Path ([Environment]::ExpandEnvironmentVariables($pd)) 'Microsoft\Windows\Start Menu\Programs\GM-IT'
+Pruefe-KeineVerknuepfung $startmenue
+New-Item -ItemType Directory -Force -Path $startmenue | Out-Null
+Pruefe-KeineVerknuepfung $startmenue
+$lnk = $shell.CreateShortcut((Join-Path $startmenue 'E-Rechnung anlernen.lnk'))
+$lnk.TargetPath = Join-Path $prog 'aktuell\python\pythonw.exe'
+$lnk.Arguments = "-m erechnung anlernen --konfig `"$ziel`""
+$lnk.WorkingDirectory = $prog
+$lnk.Description = 'Neue Rechnungsvorlage für den E-Rechnung-Konverter anlernen'
+$lnk.Save()
+
 # 5. Überwachungsaufgabe: SYSTEM, beim Start und alle 5 Min. (startet einen beendeten Überwacher neu), nie doppelt.
 #    Vor gm-update anlegen: dessen erster Lauf ruft stopp/start dieser Aufgabe auf und verwirft die Version,
 #    wenn stopp scheitert (gm-update-Spezifikation Abschnitt 7, A-Datei Schritt 5).
@@ -121,4 +143,4 @@ if (-not (Test-Path -LiteralPath (Join-Path $prog 'gm-update.json'))) { throw "g
 if (Test-Path -LiteralPath $py) { Start-ScheduledTask -TaskPath '\GM-IT\' -TaskName 'E-Rechnung' }
 else { Write-Warning "Noch keine App-Version installiert ($py fehlt). Die Aufgabe startet, sobald gm-update sie geladen hat." }
 
-Write-Host "Fertig. Drucker '$Drucker' -> $port; Senden an -> E-Rechnung; E-Rechnungen: $(Join-Path $Daten 'E-Rechnungen'); Log: $prog\erechnung.log"
+Write-Host "Fertig. Drucker '$Drucker' -> $port; Senden an -> E-Rechnung; Startmenü: E-Rechnung anlernen; E-Rechnungen: $(Join-Path $Daten 'E-Rechnungen'); Log: $prog\erechnung.log"

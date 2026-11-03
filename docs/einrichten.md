@@ -107,6 +107,53 @@ Der Überwacher lädt Vorlagen in `vorlagen\` und `vorlagen\angelernt\` binnen e
 
 Danach das betroffene PDF aus `Fehler` erneut nach `Eingang` kopieren. Bewährt sich die Vorlage, ins Repo übernehmen und mit dem nächsten Release ausliefern (dann die Kopie im Ordner `vorlagen\` entfernen).
 
+### 5. Neue Vorlage anlernen (Lernmodus)
+
+Der Kunde bringt dem Konverter ein neues Rechnungslayout selbst bei, ohne Release. Spezifikation: `docs/lernmodus/spezifikation.md`.
+
+**Wer:** Der Kunde am PC. Aktivieren, Deaktivieren, Reaktivieren und Löschen einer Vorlage braucht ein Administrator-Konto (UAC, Entscheidung F1), sonst GM IT per Fernwartung. Die erste Vorlage beim Kunden lernt GM IT gemeinsam mit dem Kunden an (F3, Prignitz Markt).
+
+**Ablauf:**
+
+1. Startmenü → **GM-IT → E-Rechnung anlernen** (öffnet die Oberfläche im Browser) → **Neue Vorlage**.
+2. Mindestens zwei Muster laden (Datei oder aus `Fehler`), möglichst das Original-PDF **und** einen Druck über „E-Rechnung“.
+3. Felder und Tabelle auf dem Muster markieren.
+4. **Probelauf** über alle Muster; alle Häkchen müssen grün sein.
+5. **Vorlage aktivieren** → UAC-Abfrage.
+
+**UAC-Abfrage prüfen (Administrator):** Die Abfrage zeigt allgemein „Python“, nicht den Namen der Anwendung. Vor „Ja“ auf **Details anzeigen** klicken. Die Befehlszeile muss lauten:
+
+```text
+…\GM-IT\erechnung-konverter\…\python.exe -m erechnung vorlage (aktivieren|deaktivieren|reaktivieren|loeschen) …
+```
+
+Steht dort etwas anderes (anderes Programm, andere Argumente, `-c`, eine fremde Skriptdatei), mit **Nein** ablehnen. Die UAC-Freigabe ist die Sicherheitsgrenze; jeder angemeldete Benutzer kann dieselbe Abfrage auslösen.
+
+**Wo liegt was:**
+
+| Was | Wo |
+|---|---|
+| Entwürfe, Muster-PDFs (Rechnungskopien) | `%LOCALAPPDATA%\GM-IT\erechnung-konverter\anlernen\entwuerfe\<name>\` (Benutzerprofil) |
+| Log der Oberfläche | `%LOCALAPPDATA%\GM-IT\erechnung-konverter\anlernen\anlernen.log` |
+| Aktive angelernte Vorlagen | `%ProgramFiles%\GM-IT\erechnung-konverter\vorlagen\angelernt\<name>.yml` |
+| Deaktivierte und ersetzte | `…\vorlagen\angelernt\deaktiviert\` |
+| Protokoll (Zeit, Benutzer, Admin-Konto, Aktion, Name, SHA-256, Anzahl Muster) | `…\vorlagen\angelernt\protokoll.txt` |
+| Ergebnis des Administrator-Laufs (JSON, nach 24 h aufgeräumt) | `…\erechnung-konverter\ergebnisse\<id>.json` |
+| Arbeitsordner des Administrator-Laufs | `…\erechnung-konverter\aktivieren-*` (neben `konfig.json`, wird nach dem Lauf gelöscht) |
+
+**Rechte prüfen:** Benutzer dürfen in `vorlagen\angelernt\` und `ergebnisse\` nur lesen (Program-Files-Standard, `einrichten.ps1` ändert sie nicht). Sonst könnte jeder Benutzer Vorlagen des SYSTEM-Dienstes ändern.
+
+```powershell
+icacls "$env:ProgramFiles\GM-IT\erechnung-konverter\vorlagen\angelernt"
+icacls "$env:ProgramFiles\GM-IT\erechnung-konverter\ergebnisse"
+```
+
+Erwartet (Windows-Standard, auf VM 108 noch zu bestätigen): `BUILTIN\Users:(I)(OI)(CI)(RX)`, Schreibrechte (`F`, `M`, `W`) nur für `NT SERVICE\TrustedInstaller`, `NT AUTHORITY\SYSTEM`, `BUILTIN\Administrators`. Steht `Users` oder `Authenticated Users` mit `M`/`W`/`F`: Vererbung wurde verändert; Ursache klären, nicht mit `icacls /grant` überdecken.
+
+**Prüfen:** `erechnung.log` zeigt binnen einer Sekunde nach dem Aktivieren „Vorlagen neu geladen: …“ (kein Neustart nötig). Danach eine Testrechnung im neuen Layout über **E-Rechnung** drucken; `<Nummer>.pdf` liegt in `E-Rechnungen`.
+
+**Export an GM IT:** In der Oberfläche **Für GM IT exportieren** → `erechnung-vorlage-<name>-<datum>.yml` im Download-Ordner (nur die Vorlage, keine Rechnungen, F2) → per Mail an GM IT. Übernahme ins Release: YAML nach `erechnung/vorlagen/` im Repo. Eine Prüfrechnung des Layouts fordert GM IT gesondert an (nur nach `/root/erechnung-testdaten/`, nie ins Repo). Nach dem Release die angelernte Datei beim Kunden **löschen** (Oberfläche **Löschen**, UAC). Die mitgelieferte Vorlage gewinnt ohnehin, im Log steht die Warnung „gleichnamig“.
+
 ## Fehlerbilder
 
 Fehler stehen je Datei in `C:\E-Rechnung\Fehler\<stempel>-<name>.fehler.txt`, das PDF daneben.
@@ -124,6 +171,11 @@ Fehler stehen je Datei in `C:\E-Rechnung\Fehler\<stempel>-<name>.fehler.txt`, da
 | Mustang-Prüfung nicht verfügbar / Mustang nicht startbar / Frist 60 s überschritten / Mustang-Prüfung ohne Bericht | `aktuell\java\` oder `aktuell\mustang\` fehlt oder ist beschädigt, Java startet nicht (Speicher, Virenscanner), PC stark ausgelastet | `erechnung.log` (Startzeile „Mustang: …“); als Administrator `& "$env:ProgramFiles\GM-IT\erechnung-konverter\aktuell\java\bin\java.exe" -version`. Danach PDF aus `Fehler` erneut nach `Eingang` |
 | Nichts passiert, `pythonw` läuft nicht | Überwacher beendet oder App fehlt | `erechnung.log` lesen; fehlt `aktuell` im Programmordner: `stand.json` und `gm-update.log` lesen (keine Freigabe, Token, Netz). Aufgabe startet einen beendeten Überwacher binnen 5 Min. neu |
 | `stand.json`: „… übersprungen bis zu einer höheren Freigabe“ | Probe der neuen Version gescheitert, gm-update blieb auf der vorigen | Ursache im `gm-update.log`, Fehler beheben, höhere Version freigeben |
+| Anker „…“ nicht gefunden (Probelauf oder Rechnung in `Fehler`) | Layout hat sich geändert oder der Druckweg verschiebt die Seite stark (Original-PDF gegen Druck über „E-Rechnung“) | Muster dieses Druckwegs hinzufügen, Vorlage neu anlernen und aktivieren |
+| Tabellenkopf … nicht gefunden | Spaltenüberschriften stehen anders (Texterkennung, anderer Druckweg) | Muster dieses Druckwegs ergänzen, Tabellenkopf neu markieren |
+| Käuferblock ohne Name, Straße, PLZ/Ort | Käuferbereich zu klein oder verschoben markiert | Bereich im Muster größer ziehen, Probelauf wiederholen |
+| Start-Link ungültig oder schon benutzt | Die Oberfläche wurde mit einem alten oder bereits verwendeten Link geöffnet (Link gilt einmal) | Oberfläche über das Startmenü neu öffnen |
+| Administratorfreigabe abgebrochen | UAC mit „Nein“ beantwortet oder geschlossen | Aktion erneut starten, Admin-Konto wählen; Befehlszeile unter „Details“ prüfen (Abschnitt 5) |
 
 ## Rückbau
 
@@ -141,11 +193,15 @@ $profilordner += (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Window
 foreach ($pr in $profilordner) {
   Remove-Item -LiteralPath (Join-Path $pr 'AppData\Roaming\Microsoft\Windows\SendTo\E-Rechnung.lnk') -ErrorAction SilentlyContinue
 }
+# Startmenü "E-Rechnung anlernen" (alle Benutzer)
+Remove-Item -LiteralPath "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\GM-IT\E-Rechnung anlernen.lnk"
 Remove-Item -Recurse -Force "$env:ProgramFiles\GM-IT\erechnung-konverter"
 ```
 
 Den Datenordner `C:\E-Rechnung` **nur nach Rücksprache mit dem Kunden** löschen: Er enthält die erzeugten E-Rechnungen und Originale.
 
+Entwürfe der Benutzer liegen in `%LOCALAPPDATA%\GM-IT\erechnung-konverter\anlernen` (jedes Benutzerprofil, enthalten Rechnungskopien). Mit dem Kunden klären, dann löschen.
+
 ## Wiederherstellung
 
-Neuinstallation mit denselben Schritten (Abschnitt 2). Eine fehlerhafte neue Version stellt gm-update selbst auf die vorige zurück; die Originale bleiben in `Originale`.
+Neuinstallation mit denselben Schritten (Abschnitt 2). Den Ordner `vorlagen\angelernt` vorher sichern (z. B. `Copy-Item -Recurse "$env:ProgramFiles\GM-IT\erechnung-konverter\vorlagen\angelernt" C:\Sicherung\`) und danach zurückkopieren. Ersatzweise die exportierten `.yml` bei GM IT nach `vorlagen\angelernt\<name>.yml` legen. Eine fehlerhafte neue Version stellt gm-update selbst auf die vorige zurück; die Originale bleiben in `Originale`.
