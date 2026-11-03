@@ -65,6 +65,7 @@ Bedrohung: andere lokale Prozesse und andere angemeldete Benutzer (Terminalserve
 | Protokoll | `<Programmordner>\vorlagen\angelernt\protokoll.txt` | dto. |
 
 - **Aktivieren braucht Administratorrechte (UAC).** Die Vorlage steuert den SYSTEM-Dienst und damit Rechnungen aller Benutzer des PCs. Die Oberfläche (Benutzerkontext) startet dafür `python.exe -m erechnung vorlage aktivieren …` per `ShellExecuteExW` mit dem Verb `runas`. Der erhöhte Prozess **vertraut dem Entwurf nicht**: Er prüft das Schema, führt den Probelauf mit allen Mustern selbst erneut aus, prüft Konflikte und schreibt erst dann (temporäre Datei, `os.replace`). Ergebnis als Exit-Code und JSON-Datei, die die Oberfläche anzeigt. Gleiches gilt für Deaktivieren, Reaktivieren und Löschen. Ist der Benutzer kein Administrator, fragt UAC nach einem Admin-Konto (GM IT oder der Admin des Kunden). Entschieden (F1): Aktivieren, Deaktivieren, Reaktivieren und Löschen nur mit Administrator-Freigabe.
+- **Bekannte Abweichung (Reaktivieren):** Reaktivieren prüft weder, ob der Dateiname zum `name` in der Datei passt, noch Namenskonflikte mit anderen aktiven Vorlagen (ohne Muster ist keine Konfliktprüfung möglich). Erreichbar nur mit Sitzung und Admin-Freigabe (UAC); bewusst so belassen.
 - `protokoll.txt` je Aktion eine Zeile: Zeit, Windows-Benutzer der Oberfläche, Admin-Konto, Aktion, Name, SHA-256 der Datei, Anzahl Muster.
 - **Updates:** `vorlagen\` liegt neben `versionen\`, gm-update ersetzt es nicht. Ein späteres Release liest `format: 1` weiter; ein unbekanntes `format` wird mit Logeintrag übersprungen (die Vorlage greift dann nicht, Rechnungen gehen nach `Fehler`, kein falsches Auslesen).
 - **Überwacher lädt ohne Neustart:** Er prüft in jedem Takt Name, Größe und Änderungszeit der `*.yml` in `vorlagen\` und `vorlagen\angelernt\`. Ändert sich etwas, lädt er die Vorlagen neu. Eine ungültige Datei in diesen beiden Ordnern wird mit Warnung im Log übersprungen, der Überwacher läuft weiter (bisher: Abbruch beim Start).
@@ -168,7 +169,7 @@ Zeilen eines Rahmens: Wörter nach Mittelpunkt-y gruppiert (Toleranz: halbe mitt
 
 - Andere Druckwege derselben Rechnung (Programm direkt, Edge-Raster, „Senden an“ mit Original) verschieben und skalieren die Seite leicht. Relative Koordinaten machen Auflösung und Seitengröße egal; Anker gleichen Verschiebungen aus; der vergrößerte Rahmen und Mittelpunktregel fangen kleine Skalierungen. Eine Skalierung auf „Seite anpassen“ (Edge, rund 95 %) verschiebt weit vom Anker entfernte Felder um bis zu ~1 % der Seite; Rahmen deshalb nicht knapp ziehen (Hinweis in der Oberfläche).
 - Die Oberfläche empfiehlt, je Druckweg ein Muster zu hinterlegen: das Original-PDF und einen Druck über den Drucker „E-Rechnung“ (landet bei unbekanntem Layout in `Fehler` und kann von dort übernommen werden, 7.1).
-- **Belegt wird das auf VM 108** (Task 11): dieselbe Rechnung als Text-PDF und als Edge-Druck.
+- **Belegt wird das auf VM 108** (Task 14): dieselbe Rechnung als Text-PDF und als Edge-Druck.
 
 ## 7. Ablauf in der Oberfläche
 
@@ -217,7 +218,7 @@ Vorbefüllen: Die generische Erkennung (`erechnung.generisch.vorschlag_aus_pdf`,
 - Testdaten: Unit-Tests nutzen die synthetischen Muster aus `tests/hilfen_bereiche.py` (CI). Für Gegenproben mit realistischeren Layouts: `werkzeuge/fremdrechnungen.py` erzeugt deterministisch Rechnungen in sieben fremden Layouts (A–G) nach `/root/erechnung-testdaten/fremd/` (`<layout>-<n>.pdf`, je Layout ein `<layout>-1-bild.pdf`, je Datei `.soll.json` mit Sollwerten und erwartetem Verhalten); erzeugen mit `/root/.venvs/erechnung/bin/python werkzeuge/fremdrechnungen.py`, Gegenprobe mit `--gegenprobe`. Nur auf gm-claude, PDFs nicht ins Repo.
 - pytest: Schema (gültig, jede Regel einzeln verletzt, Größe), Auslesen per Bereich mit synthetischen reportlab-PDFs (zwei Layouts, verschoben, mehrseitig mit Übertrag, mehrzeilige Bezeichnung), dasselbe als Bild-PDF über Tesseract (übersprungen ohne Tesseract), TSV-Parser mit fester TSV, Überwacher-Neuladen, Server (Token einmalig, Cookie, Host, Origin, CSRF, Pfade, Größen, Leerlauf), Verwalten (Probelauf, Aktivieren mit ersetztem `als_admin`, Konflikt, Protokoll, Export nur `vorlage.yml`). Bestehende Tests laufen unverändert.
 - Browser: Playwright (MCP auf gm-claude, Chromium) gegen den echten Server mit Testdaten: Markieren eines Feldes per Maus, Probelauf, Ansicht 1280 px hell und dunkel, 390 px Lesbarkeit der Liste. Kein Playwright in der CI (neue Abhängigkeit ohne Gewinn für die Logik, die die pytest-Tests abdecken).
-- Abnahme auf VM 108 (Task 11).
+- Abnahme auf VM 108 (Task 14).
 
 ## 10. Grundschutz-Abgleich (Erweiterung)
 
@@ -259,7 +260,7 @@ Unverändert aus Hauptspezifikation 10 und weiter gültig: KONF.8.1/8.2, DET.5.1
 
 Auf VM 108 mit Release 0.2.0 über gm-update, Benutzer ohne Adminrechte:
 1. Startmenü „E-Rechnung anlernen“ öffnet den Browser, Oberfläche im GM-Look.
-2. Eine Rechnung in fremdem Layout (Testdaten, Task 11) zweimal (Original-PDF und Edge-Druck aus `Fehler`) als Muster; alle Pflichtfelder und Tabelle markiert; Probelauf beide grün, Mustang valid.
+2. Eine Rechnung in fremdem Layout (Testdaten, Task 14) zweimal (Original-PDF und Edge-Druck aus `Fehler`) als Muster; alle Pflichtfelder und Tabelle markiert; Probelauf beide grün, Mustang valid.
 3. Aktivieren mit UAC und Admin-Konto; `protokoll.txt` mit Eintrag.
 4. Ohne Neustart: dieselbe Rechnung gedruckt und per Edge gedruckt → E-Rechnung in `E-Rechnungen`, Mustang valid im Log.
 5. Ein zweiter Benutzer (schnelle Benutzerumschaltung) erreicht den Port ohne Token nur mit `403`.

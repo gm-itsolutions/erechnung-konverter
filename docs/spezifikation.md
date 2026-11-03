@@ -1,6 +1,6 @@
 # erechnung-konverter – Spezifikation
 
-- **Stand:** 02.11.2026, Version 1 (Durchstich für den Kundentermin am 03.11.2026); Ergänzung 02.11.2026: Senden an (3.3), Texterkennung (3.2); 0.1.6: nur ZUGFeRD-PDF im Ausgabeordner, Mustang-Prüfung jeder Rechnung (3.4); 0.1.7: Lesarten-Rückfall der Texterkennung (3.2)
+- **Stand:** 02.11.2026, Version 1 (Durchstich für den Kundentermin am 03.11.2026); Ergänzung 02.11.2026: Senden an (3.3), Texterkennung (3.2); 0.1.6: nur ZUGFeRD-PDF im Ausgabeordner, Mustang-Prüfung jeder Rechnung (3.4); 0.1.7: Lesarten-Rückfall der Texterkennung (3.2); 0.2.0: Lernmodus
 - **Projekt:** ai-os `30-projekte/erechnung-konverter.md`, Teilprojekt 2 von gm-update
 - **Repo:** `git.gm-itsolutions.de/gm-itsolutions/erechnung-konverter` (privat), Klon `/root/erechnung-konverter`
 - **Plan:** `docs/plan/index.md`
@@ -102,6 +102,7 @@ java\bin\java.exe -Xmx512m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -jar mustang
 | `erechnung/cii.py` | `erzeuge_cii()` (CII-XML, EN16931); Nachlass/Zuschlag als Kopf-`SpecifiedTradeAllowanceCharge` mit Steuersatz, `LineTotalAmount` = Σ Positionen, `Charge-`/`AllowanceTotalAmount`, `TaxBasisTotalAmount` = Netto (wie Lexware RE0158) |
 | `erechnung/ueberwachen.py` | `Konfig`, `lade_konfig()`, `verarbeite()`, `schritt()`, `ueberwache()` |
 | `erechnung/vorlagen/*.yml` | eine Vorlage je Layout |
+| Lernmodus | `erechnung/bereiche.py`, `erechnung/anlernen/` – siehe `docs/lernmodus/spezifikation.md` |
 | `release/bauen.sh`, `release/requirements-windows.txt`, `release/mustang.env` | Windows-ZIP auf Linux bauen; `mustang.env`: Versionen und SHA-256 von Mustang-CLI und Temurin-JRE |
 | `release/mustang_holen.sh` | CI: Mustang-CLI und (ohne Java im Job-Image) Linux-JRE aus der Paketablage |
 | `einrichten/einrichten.ps1`, `einrichten/gm-update.json`, `einrichten/konfig.beispiel.json` | Einrichtung beim Kunden |
@@ -161,12 +162,15 @@ Optional `felder.nummer_kontrolle`: zweite Fundstelle der Nummer; ist der Schlü
 
 Regeln: Genau eine Vorlage muss passen, sonst Fehler („keine Vorlage“ / „mehrere Vorlagen: a, b“). Zeilen zwischen `start` und `ende`, die nicht auf `zeile` passen, nicht leer sind und nicht unter `ignorieren` fallen, werden an die Bezeichnung der vorigen Position angehängt. Endet die Bezeichnung auf Wort + `-`, gilt: Folgezeile beginnt klein → Silbentrennung, Strich entfällt („Dokumentenscan-“ + „ner“); beginnt sie mit „und/oder/bzw./sowie“ → Strich bleibt, mit Leerzeichen („Einzugs- und …“); sonst Strich bleibt ohne Leerzeichen („E-Mail-“ + „Postfach“). Ein mehrzeiliger Käufername (Zusatzzeile unter der Firma) wird nicht zusammengesetzt, nur die erste Zeile gilt als Name. Zusätzliche Vorlagen ohne Release: Ordner `vorlagen\` neben `konfig.json` (nur Administratoren schreiben).
 
+Angelernte Vorlagen (`art: bereiche`) siehe Lernmodus-Spezifikation 5.
+
 ## 6. Ordner und Rechte (Windows)
 
 | Pfad | Inhalt | Rechte |
 |---|---|---|
 | `%ProgramFiles%\GM-IT\erechnung-konverter\` | gm-update (`gm-update.exe`, `gm-update.json`, `token`, `stand.json`, `versionen\`, `aktuell`), `konfig.json`, `vorlagen\`, `arbeit\`, `erechnung.log` | geerbt von Program Files (Benutzer lesen/ausführen); `gm-update.json`/`token` nur SYSTEM+Admins (macht gm-update) |
 | `C:\E-Rechnung\` (konfigurierbar) | Wurzel | Besitzer Administratoren, Vererbung aus, SYSTEM/Admins Vollzugriff, Benutzer Lesen |
+| `%ProgramFiles%\GM-IT\erechnung-konverter\vorlagen\angelernt\` | aktive angelernte Vorlagen, `deaktiviert\`, `protokoll.txt`; daneben `ergebnisse\` (Ergebnisse des Administrator-Laufs) | geerbt von Program Files: Benutzer lesen, nur Administratoren schreiben |
 | `…\Eingang` | Port-Datei | zusätzlich Benutzer Ändern (bis Task 10 klärt, ob nötig) |
 | `…\E-Rechnungen`, `…\Originale`, `…\Fehler` | Ergebnisse | Benutzer Lesen |
 

@@ -1,0 +1,29 @@
+name: test-bereiche
+art: bereiche
+format: 1
+schluesselwoerter: ["Beispiel Werkstatt", "Belegnummer"]
+angelernt: {am: "2026-11-02", muster: 2}
+felder:
+  nummer: {seite: erste, rahmen: [0.68, 0.148, 0.95, 0.166], anker: {text: "Belegnummer", rahmen: [0.50, 0.150, 0.60, 0.162]}}
+  datum: {seite: erste, rahmen: [0.68, 0.168, 0.95, 0.186], anker: {text: "Belegdatum", rahmen: [0.50, 0.170, 0.59, 0.182]}}
+  zahlungsziel_tage: {seite: erste, rahmen: [0.68, 0.188, 0.95, 0.206], anker: {text: "Zahlbar in", rahmen: [0.50, 0.190, 0.58, 0.202]}}
+  kaeufer: {seite: erste, rahmen: [0.07, 0.146, 0.45, 0.206]}
+  summe_netto: {seite: letzte, rahmen: [0.75, 0.343, 0.95, 0.361], anker: {text: "Summe netto", rahmen: [0.50, 0.345, 0.60, 0.357]}}
+  summe_brutto: {seite: letzte, rahmen: [0.75, 0.383, 0.95, 0.401], anker: {text: "Endbetrag", rahmen: [0.50, 0.385, 0.58, 0.397]}}
+steuern:
+  seite: letzte
+  anker: {text: "MwSt. {satz} %", rahmen: [0.50, 0.365, 0.60, 0.377]}
+  rahmen: [0.75, 0.363, 0.95, 0.381]
+positionen:
+  kopf: {text: "Nr Leistung Anzahl", rahmen: [0.08, 0.250, 0.562, 0.262]}
+  ende: {text: "Summe netto", rahmen: [0.50, 0.345, 0.60, 0.357]}
+  unten: 0.92
+  links: 0.07
+  spalten:
+    - {bis: 0.13, art: nr}
+    - {bis: 0.50, art: bezeichnung}
+    - {bis: 0.60, art: menge_einheit}
+    - {bis: 0.75, art: einzelpreis}
+    - {bis: 0.95, art: netto}
+  ust_satz: 19
+einheiten: {Std: HUR, Stk: H87}

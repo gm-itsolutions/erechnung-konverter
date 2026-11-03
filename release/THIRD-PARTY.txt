@@ -61,3 +61,9 @@ Python und Python-Pakete (Ordner python\)
 Python 3.14 (Windows embeddable)  PSF License            python\LICENSE.txt
 Python-Pakete (pdfplumber, pdfminer.six, pypdfium2, lxml, factur-x, pyyaml, pillow, …):
   Lizenz je Paket in python\Lib\site-packages\<paket>-<version>.dist-info\
+
+Oberfläche des Lernmodus (Ordner app\erechnung\anlernen\statisch\fonts\)
+-----------------------------------------------------------------------
+IBM Plex Sans, IBM Plex Mono   SIL Open Font License 1.1   https://github.com/IBM/plex
+  woff2-Dateien unverändert, lokal eingebunden (keine Anfrage an Dritte). Lizenztext: fonts\OFL.txt
+  (LICENSE.txt aus IBM/plex, Commit 71f558992315a12ca1f06a2215d57962a1992162, SHA-256 7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da).

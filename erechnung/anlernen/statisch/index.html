@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="csrf" content="{{csrf}}">
+<title>E-Rechnung anlernen – GM IT Solutions</title>
+<link rel="icon" href="/statisch/favicon.svg">
+<link rel="stylesheet" href="/statisch/gm.css">
+<link rel="stylesheet" href="/statisch/app.css">
+<script src="/statisch/anlernen.js" defer></script>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar">
+    <div>
+      <img class="logo" src="/statisch/logo.png" alt="GM - IT Solutions">
+      <div class="app-name">E-Rechnung anlernen</div>
+    </div>
+    <nav class="nav" aria-label="Hauptnavigation">
+      <a href="#vorlagen" id="nav-vorlagen">Vorlagen</a>
+      <a href="#anlernen" id="nav-anlernen">Anlernen</a>
+    </nav>
+    <div class="user"><button type="button" class="btn btn-secondary btn-sm beenden" id="beenden">Beenden</button></div>
+  </aside>
+
+  <main class="main">
+    <div class="alert err" id="meldung" role="alert" hidden></div>
+
+    <section id="ansicht-vorlagen" hidden>
+      <div class="page-head">
+        <h1>Vorlagen</h1>
+        <button type="button" class="btn btn-primary" id="neu-oeffnen">Neue Vorlage</button>
+      </div>
+
+      <section class="card" id="neu-dialog" hidden>
+        <h2>Neue Vorlage</h2>
+        <div class="field">
+          <label for="neu-name">Name</label>
+          <input id="neu-name" autocomplete="off" maxlength="40">
+          <div class="hint">nur Kleinbuchstaben, Ziffern und Bindestrich</div>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" id="neu-anlegen">Anlegen</button>
+          <button type="button" class="btn btn-secondary" id="neu-abbrechen">Abbrechen</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Art</th><th>Status</th><th><span class="unsichtbar">Aktionen</span></th></tr></thead>
+            <tbody id="vorlagen-liste"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="vorlagen-leer" hidden>Noch keine eigene Vorlage. Mit ‚Neue Vorlage‘ eine Muster-Rechnung anlernen.</div>
+      </section>
+      <div class="alert info uac" id="vorlagen-uac" hidden></div>
+    </section>
+
+    <section id="ansicht-anlernen" hidden>
+      <div class="empty" id="anlernen-leer">Zuerst unter „Vorlagen“ einen Entwurf öffnen oder eine neue Vorlage anlegen.</div>
+      <div id="anlernen-inhalt" hidden>
+        <div class="page-head">
+          <h1 id="anlernen-titel">Vorlage anlernen</h1>
+          <div class="actions kopf-aktionen">
+            <button type="button" class="btn btn-secondary" id="probe-wiederholen" hidden>Probelauf wiederholen</button>
+            <button type="button" class="btn btn-primary" id="probelauf" disabled>Probelauf</button>
+            <button type="button" class="btn btn-primary" id="aktivieren" hidden disabled>Vorlage aktivieren</button>
+          </div>
+        </div>
+
+        <section id="probe" class="probe" aria-live="polite" hidden>
+          <h2 id="probe-titel">Probelauf</h2>
+          <div id="probe-inhalt"></div>
+        </section>
+
+        <div class="lern-raster">
+          <div>
+            <section class="card">
+              <h2>Muster</h2>
+              <ul class="liste" id="muster-liste"></ul>
+              <div class="empty klein" id="muster-leer">Noch kein Muster. Eine Rechnung in diesem Layout hinzufügen, besser zwei (Original und Druck über „E-Rechnung“).</div>
+              <div class="field">
+                <div class="feld-titel">Datei hinzufügen</div>
+                <input type="file" id="muster-datei" class="unsichtbar datei" accept="application/pdf">
+                <label for="muster-datei" class="btn btn-secondary">PDF auswählen</label>
+              </div>
+              <div class="field">
+                <label for="muster-fehler">Aus Fehler-Ordner übernehmen</label>
+                <select id="muster-fehler"></select>
+              </div>
+            </section>
+
+            <section class="card">
+              <h2>Felder</h2>
+              <ul class="liste felder" id="felder-liste"></ul>
+              <div class="field">
+                <label for="erkennung">Erkennungstexte</label>
+                <input id="erkennung" autocomplete="off">
+                <div class="hint">kommagetrennt; alle müssen auf jeder Rechnung dieses Layouts stehen</div>
+              </div>
+            </section>
+          </div>
+
+          <section class="card bild-karte">
+            <div class="alert warn nur-klein">Zum Markieren einen größeren Bildschirm verwenden.</div>
+            <div class="nur-gross">
+              <div class="bild-kopf">
+                <label for="muster-wahl" class="unsichtbar">Muster</label>
+                <select id="muster-wahl"></select>
+                <div class="blaettern">
+                  <button type="button" class="btn btn-secondary btn-sm" id="seite-zurueck" aria-label="vorige Seite">‹</button>
+                  <span class="mono" id="seite-anzeige">–</span>
+                  <button type="button" class="btn btn-secondary btn-sm" id="seite-vor" aria-label="nächste Seite">›</button>
+                </div>
+              </div>
+              <div class="alert info hinweis" id="hinweis" aria-live="polite">Feld wählen und „Markieren“ drücken.</div>
+              <div class="modus-aktionen" id="modus-aktionen"></div>
+              <div class="bild" id="bild">
+                <img id="seitenbild" alt="">
+                <canvas id="leinwand" aria-label="Seite der Muster-Rechnung"></canvas>
+              </div>
+              <div class="spalten-wahl" id="spalten-wahl"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="beendet" id="beendet" hidden><p>Oberfläche beendet. Fenster schließen.</p></div>
+</body>
+</html>

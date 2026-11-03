@@ -55,12 +55,17 @@ cp -r einrichten "$B/einrichten"
 for f in python/pythonw.exe python/python.exe python/Lib/site-packages/lxml/etree.cp314-win_amd64.pyd \
          python/Lib/site-packages/facturx/__init__.py python/Lib/site-packages/pdfplumber/__init__.py \
          python/Lib/site-packages/yaml/__init__.py app/erechnung/__main__.py app/erechnung/vorlagen/lexware-gm-it.yml \
+         app/erechnung/bereiche.py app/erechnung/anlernen/server.py app/erechnung/anlernen/statisch/index.html \
+         app/erechnung/anlernen/statisch/gm.css app/erechnung/anlernen/statisch/anlernen.js \
+         app/erechnung/anlernen/statisch/fonts/OFL.txt \
          einrichten/einrichten.ps1 einrichten/gm-update.json tesseract/tesseract.exe tesseract/tesseract55.dll \
          tesseract/tessdata/deu.traineddata tesseract/lizenzen/tesseract THIRD-PARTY.txt \
          java/bin/java.exe java/legal java/NOTICE "mustang/Mustang-CLI-$MUSTANG.jar"; do
   test -e "$B/$f" || { echo "fehlt: $f" >&2; exit 1; }
 done
 grep -qx "__version__ = \"$V\"" "$B/app/erechnung/__init__.py"
+# python314._pth ohne "import site": der erhöhte Lauf (Lernmodus) soll keine Benutzer-Pfade (site, usercustomize) laden
+if grep -q "import site" "$B/python/python314._pth"; then echo "python314._pth enthält import site" >&2; exit 1; fi
 # zip/unzip werden nicht gebraucht: Python-Standardbibliothek (komprimiert mit Deflate)
 python3 -c 'import shutil, sys; shutil.make_archive(sys.argv[1], "zip", sys.argv[2])' "dist/$PRODUKT-$V-windows-amd64" "$B"
 ls -l "dist/$PRODUKT-$V-windows-amd64.zip"

@@ -1,0 +1,151 @@
+/* GM IT Solutions – WebUI-Grundlage
+   Farben und Schriften wie gm-itsolutions.de (css/style.css).
+   Regeln: 50-vorlagen/webui/README.md. Datei unverändert kopieren,
+   projektspezifisches in eine eigene app.css. */
+
+@font-face{ font-family:'IBM Plex Sans'; font-weight:100 700; font-display:swap;
+  src:url(fonts/IBMPlexSans-latin.woff2) format('woff2');
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face{ font-family:'IBM Plex Sans'; font-weight:100 700; font-display:swap;
+  src:url(fonts/IBMPlexSans-latin-ext.woff2) format('woff2');
+  unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face{ font-family:'IBM Plex Mono'; font-weight:400 500; font-display:swap;
+  src:url(fonts/IBMPlexMono-latin.woff2) format('woff2');
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face{ font-family:'IBM Plex Mono'; font-weight:400 500; font-display:swap;
+  src:url(fonts/IBMPlexMono-latin-ext.woff2) format('woff2');
+  unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+
+/* ---------- Tokens ---------- */
+:root{
+  color-scheme: light dark;
+  --bg:#F6F7F5; --bg-alt:#EEF1EE; --surface:#FFFFFF;
+  --ink:#141A1F; --ink-muted:#4B565F; --ink-faint:#7C8790;
+  --border:#DCE1DD; --border-strong:#C4CBC5;
+  --navy:#1C2B3A; --navy-2:#24384B; --navy-3:#2E465C; --on-navy:#EAF0F4;
+  --amber:#F2B227; --amber-hover:#E5A50F; --amber-deep:#8A5D05; --amber-soft:#FDF4E0; --amber-line:#EBD5A4;
+  --on-amber:#23303B;
+  --ok:#1F7A4D;   --ok-bg:#E3F2EA;
+  --warn:#8A5D05; --warn-bg:#FDF4E0;
+  --err:#B42318;  --err-bg:#FDECEA;
+  --info:#24384B; --info-bg:#E8EEF4;
+  --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+  --radius:3px;
+  --space-1:.5rem; --space-2:1rem; --space-3:1.5rem; --space-4:2.5rem;
+  --sidebar:240px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#14191E; --bg-alt:#1A2027; --surface:#1B222A;
+    --ink:#E8EDF1; --ink-muted:#AEBCC7; --ink-faint:#8595A2;
+    --border:#2C3742; --border-strong:#3D4A57;
+    --navy:#101922; --navy-2:#16212C; --navy-3:#1E2C39;
+    --amber:#F5BC3F; --amber-deep:#F0C46A; --amber-soft:#241F14; --amber-line:#4A3C1C;
+    --ok:#5FC08E;   --ok-bg:#15261D;
+    --warn:#F0C46A; --warn-bg:#241F14;
+    --err:#F07B6E;  --err-bg:#2A1715;
+    --info:#8DB3D6; --info-bg:#17222D;
+  }
+}
+
+/* ---------- Basis ---------- */
+*,*::before,*::after{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{ margin:0; font:400 15px/1.5 var(--font-sans); color:var(--ink); background:var(--bg); }
+h1,h2,h3{ line-height:1.25; margin:0 0 var(--space-2); font-weight:600; }
+h1{ font-size:1.5rem; } h2{ font-size:1.2rem; } h3{ font-size:1rem; }
+p{ margin:0 0 var(--space-2); }
+a{ color:var(--amber-deep); }
+code,.mono{ font-family:var(--font-mono); font-size:.9em; }
+td.mono{ white-space:nowrap; }
+.muted{ color:var(--ink-muted); }
+.num{ font-variant-numeric:tabular-nums; text-align:right; }
+:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+@media (prefers-reduced-motion: reduce){ *{ transition:none!important; animation:none!important; } }
+
+/* ---------- App-Gerüst: Seitenleiste ab 900px, sonst Kopfleiste ---------- */
+.app{ min-height:100vh; display:grid; grid-template-columns:var(--sidebar) minmax(0,1fr); }
+.sidebar{ background:var(--navy); color:var(--on-navy); padding:var(--space-3) var(--space-2);
+  display:flex; flex-direction:column; gap:var(--space-3); position:sticky; top:0; height:100vh; }
+.sidebar .logo{ display:block; width:100%; max-width:190px; height:auto; }
+.sidebar .app-name{ font-family:var(--font-mono); font-size:.75rem; color:var(--amber); letter-spacing:.04em; text-transform:uppercase; margin-top:.4rem; }
+.nav{ display:flex; flex-direction:column; gap:2px; }
+.nav a{ color:var(--on-navy); text-decoration:none; padding:.55rem .75rem; border-radius:var(--radius); border-left:3px solid transparent; }
+.nav a:hover{ background:var(--navy-3); }
+.nav a[aria-current="page"]{ background:var(--navy-2); border-left-color:var(--amber); font-weight:500; }
+.sidebar .user{ margin-top:auto; font-size:.85rem; color:#AEBCC7; }
+.sidebar .user a{ color:var(--amber); }
+.main{ padding:var(--space-4); max-width:1280px; width:100%; }
+.page-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--space-2); margin-bottom:var(--space-3); }
+.page-head h1{ margin:0; }
+
+@media (max-width: 900px){
+  .app{ grid-template-columns:minmax(0,1fr); }
+  .sidebar{ position:sticky; height:auto; z-index:10; flex-direction:row; flex-wrap:wrap; align-items:center; padding:.6rem var(--space-2); gap:.5rem var(--space-2); }
+  .sidebar .logo{ max-width:140px; }
+  .sidebar .app-name{ display:none; }
+  .nav{ flex-direction:row; overflow-x:auto; width:100%; order:3; }
+  .nav a{ white-space:nowrap; border-left:0; border-bottom:3px solid transparent; }
+  .nav a[aria-current="page"]{ border-bottom-color:var(--amber); }
+  .sidebar .user{ margin:0 0 0 auto; }
+  .main{ padding:var(--space-3) var(--space-2); }
+}
+
+/* ---------- Bausteine ---------- */
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:var(--space-3); margin-bottom:var(--space-3); }
+.card > h2:first-child{ font-size:1rem; }
+.grid{ display:grid; gap:var(--space-3); grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); margin-bottom:var(--space-3); }
+.grid > .card{ margin:0; }
+.kpi .label{ font-family:var(--font-mono); font-size:.75rem; color:var(--amber-deep); text-transform:uppercase; letter-spacing:.04em; }
+.kpi .value{ font-size:1.9rem; font-weight:600; font-variant-numeric:tabular-nums; }
+
+.btn{ display:inline-flex; align-items:center; justify-content:center; gap:.5em; font:500 .95rem var(--font-sans);
+  padding:.6rem 1.1rem; border-radius:var(--radius); border:1px solid transparent; cursor:pointer; text-decoration:none; white-space:nowrap; }
+.btn-primary{ background:var(--amber); color:var(--on-amber); font-weight:600; }
+.btn-primary:hover{ background:var(--amber-hover); }
+.btn-secondary{ background:transparent; color:var(--ink); border-color:var(--border-strong); }
+.btn-secondary:hover{ border-color:var(--amber); color:var(--amber-deep); }
+.btn-danger{ background:transparent; color:var(--err); border-color:var(--err); }
+.btn-danger:hover{ background:var(--err-bg); }
+.btn:disabled{ opacity:.5; cursor:not-allowed; }
+.btn-sm{ padding:.3rem .65rem; font-size:.85rem; }
+
+label{ display:block; font-weight:500; margin-bottom:.3rem; }
+.field{ margin-bottom:var(--space-2); }
+.field .hint{ font-size:.85rem; color:var(--ink-faint); margin-top:.25rem; }
+input,select,textarea{ width:100%; font:inherit; color:var(--ink); background:var(--surface);
+  border:1px solid var(--border-strong); border-radius:var(--radius); padding:.55rem .7rem; }
+input:focus,select:focus,textarea:focus{ outline:none; border-color:var(--amber); box-shadow:0 0 0 3px var(--amber-soft); }
+input[aria-invalid="true"]{ border-color:var(--err); }
+input[type="checkbox"],input[type="radio"]{ width:auto; accent-color:var(--amber); }
+.actions{ display:flex; flex-wrap:wrap; gap:var(--space-1); margin-top:var(--space-3); }
+
+.table-wrap{ overflow-x:auto; }
+table{ width:100%; border-collapse:collapse; font-size:.92rem; }
+th{ text-align:left; font-family:var(--font-mono); font-weight:500; font-size:.75rem; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); }
+th,td{ padding:.6rem .75rem; border-bottom:1px solid var(--border); vertical-align:middle; }
+tbody tr:hover{ background:var(--bg-alt); }
+
+.pill{ display:inline-block; font-size:.78rem; font-weight:500; padding:.12rem .55rem; border-radius:999px; background:var(--bg-alt); color:var(--ink-muted); }
+.pill.ok{ background:var(--ok-bg); color:var(--ok); }
+.pill.warn{ background:var(--warn-bg); color:var(--warn); }
+.pill.err{ background:var(--err-bg); color:var(--err); }
+.pill.info{ background:var(--info-bg); color:var(--info); }
+
+.alert{ border-left:3px solid; border-radius:var(--radius); padding:.75rem 1rem; margin-bottom:var(--space-2); }
+.alert.ok{ background:var(--ok-bg); border-color:var(--ok); }
+.alert.warn{ background:var(--warn-bg); border-color:var(--amber); }
+.alert.err{ background:var(--err-bg); border-color:var(--err); }
+.alert.info{ background:var(--info-bg); border-color:var(--info); }
+
+.empty{ text-align:center; color:var(--ink-faint); padding:var(--space-4) var(--space-2); }
+
+/* ---------- Anmeldung ---------- */
+.login{ min-height:100vh; display:grid; place-items:center; padding:var(--space-2); background:var(--navy); }
+.login .card{ width:100%; max-width:380px; margin:0; }
+.login .logo{ display:block; width:220px; max-width:100%; margin:0 auto var(--space-3); }
+.login .card h1{ font-size:1.15rem; }
+.login input[name="totp"]{ font-family:var(--font-mono); letter-spacing:.3em; text-align:center; font-size:1.2rem; }
+.login footer{ color:#AEBCC7; font-size:.8rem; text-align:center; margin-top:var(--space-2); }
+.login footer a{ color:var(--amber); }

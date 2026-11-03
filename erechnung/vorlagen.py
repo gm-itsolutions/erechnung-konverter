@@ -1,4 +1,5 @@
 """Vorlagen je Layout (YAML, angelehnt an invoice2data) → Rechnung. Spezifikation Abschnitt 5."""
+import logging
 import re
 from datetime import timedelta
 from decimal import Decimal
@@ -6,7 +7,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 import pdfplumber
 import yaml
+from .bereiche import BereichsFehler, pruefe_bereichsvorlage
 from .modell import Nachlass, Partei, Position, Rechnung, betrag, datum, summenabgleich
+log = logging.getLogger("erechnung")
+MAX_BYTES = 64 * 1024
 STANDARD = Path(__file__).parent / "vorlagen"
 PFLICHT = ("nummer", "datum", "summe_netto", "summe_brutto")
 MIN_ZEICHEN = 20          # weniger Buchstaben/Ziffern im PDF → Bild → Texterkennung
@@ -17,6 +21,11 @@ def pdf_text(pdf: Path, layout: bool = False) -> str:
     with pdfplumber.open(pdf) as d:
         return "\n".join(s.extract_text(layout=layout) or "" for s in d.pages)
 def _pruefe(v: dict, datei: Path) -> dict:
+    if v.get("art") == "bereiche":
+        try:
+            return pruefe_bereichsvorlage(v)
+        except BereichsFehler as e:
+            raise VorlagenFehler(f"Vorlage {datei.name}: {e}") from None
     try:
         assert v.get("name") and v.get("schluesselwoerter"), "name/schluesselwoerter fehlen"
         assert all(f in v.get("felder", {}) for f in PFLICHT), f"felder brauchen {', '.join(PFLICHT)}"
@@ -30,12 +39,30 @@ def _pruefe(v: dict, datei: Path) -> dict:
     except (AssertionError, re.error) as e:
         raise VorlagenFehler(f"Vorlage {datei.name}: {e}") from None
     return v
-def lade_vorlagen(*ordner: Path) -> list[dict]:
+def _lade_datei(datei: Path) -> dict:
+    """Eine Datei laden und prüfen; jeder Fehler wird zum VorlagenFehler mit Dateiname."""
+    try:
+        if datei.stat().st_size > MAX_BYTES:
+            raise VorlagenFehler(f"Vorlage {datei.name}: zu groß (höchstens {MAX_BYTES} Byte)")
+        v = yaml.safe_load(datei.read_text(encoding="utf-8")) or {}
+        if not isinstance(v, dict):
+            raise VorlagenFehler(f"Vorlage {datei.name}: kein Abschnitt name/felder/…")
+        return _pruefe(v, datei)
+    except VorlagenFehler:
+        raise
+    except (yaml.YAMLError, UnicodeDecodeError, OSError, TypeError, AttributeError, KeyError) as e:
+        raise VorlagenFehler(f"Vorlage {datei.name}: {type(e).__name__}: {e}") from None
+def lade_vorlagen(*ordner: Path, tolerant: bool = False) -> list[dict]:
     vorlagen = []
     for o in ordner:
         if o.is_dir():
             for datei in sorted(o.glob("*.yml")):
-                vorlagen.append(_pruefe(yaml.safe_load(datei.read_text(encoding="utf-8")) or {}, datei))
+                try:
+                    vorlagen.append(_lade_datei(datei))
+                except VorlagenFehler as e:
+                    if not tolerant:
+                        raise
+                    log.warning("Vorlage übersprungen: %s: %s", datei, e)
     return vorlagen
 def finde_vorlage(text: str, vorlagen: list[dict]) -> dict:
     kompakt = "".join(text.split())                         # Leerzeichen egal (Texterkennung)
@@ -115,12 +142,19 @@ def rechnung_aus_text(text: str, vorlage: dict, verkaeufer: Partei) -> Rechnung:
         leistungsdatum=datum(opt("leistungsdatum")) if opt("leistungsdatum") else None,
         faellig=faellig, vorlage=v["name"], nachlaesse=nachlaesse)
 def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
-                  ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None) -> Rechnung:
-    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden, liefert Lesarten (Name, Text))
-    und dieselbe Vorlagenlogik."""
+                  ocr: Callable[[Path], Iterable[tuple]] | None = None) -> Rechnung:
+    """Text aus dem PDF; hat es (fast) keinen, Texterkennung `ocr` (falls vorhanden) und dieselbe Vorlagenlogik.
+    `ocr` liefert Lesarten (Name, Text), (Name, (Text, Seiten)) oder (Name, Text, Seiten) wie `ocr.erkenne_seiten`;
+    Regex-Vorlagen lesen nur den Text, Bereichsvorlagen die Wörter mit Lage (Seiten)."""
     text = pdf_text(pdf)
     if len(re.findall(r"\w", text)) >= MIN_ZEICHEN:
         v = finde_vorlage(text, vorlagen)
+        if v.get("art") == "bereiche":
+            from .bereiche import rechnung_aus_bereichen, woerter_aus_pdf
+            try:
+                return rechnung_aus_bereichen(woerter_aus_pdf(pdf), v, verkaeufer)
+            except BereichsFehler as e:
+                raise VorlagenFehler(str(e)) from None
         if v.get("layout"):
             text = pdf_text(pdf, layout=True)
         return rechnung_aus_text(text, v, verkaeufer)
@@ -132,13 +166,20 @@ def lies_rechnung(pdf: Path, vorlagen: list[dict], verkaeufer: Partei,
     erster, versucht = None, []
     lesarten = iter(ocr(pdf))
     try:
-        for name, text in lesarten:
+        for name, text, *seiten in lesarten:
             versucht.append(name)
+            text, seiten = text if isinstance(text, tuple) else (text, seiten[0] if seiten else None)
             try:
                 v = finde_vorlage(text, vorlagen)
                 if len(versucht) > 1 and "nummer_kontrolle" not in v["felder"]:
                     raise VorlagenFehler("ohne Gegenprobe der Rechnungsnummer (nummer_kontrolle) nicht verwendet")
-                r = rechnung_aus_text(text, v, verkaeufer)
+                if v.get("art") == "bereiche":
+                    if seiten is None:
+                        raise VorlagenFehler("Bereichsvorlage braucht die Wortlagen der Texterkennung")
+                    from .bereiche import rechnung_aus_bereichen
+                    r = rechnung_aus_bereichen(seiten, v, verkaeufer, ocr=True)
+                else:
+                    r = rechnung_aus_text(text, v, verkaeufer)
                 summenabgleich(r)
             except ValueError as e:
                 if erster and str(e) != str(erster):
