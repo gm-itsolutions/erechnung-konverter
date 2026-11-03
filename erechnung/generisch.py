@@ -587,8 +587,10 @@ def erkenne(text: str) -> Vorschlag:
         art = _art(z)
         if art == "U":
             continue
-        if art in ("N", "B", "T", "S") or FUSS.search(z):
-            in_tabelle = not mit_kopf
+        if art in ("N", "B") and re.search(r"(?i)(?:brutto|netto|einzel)preis", z):
+            continue     # „Bruttopreis: 9,9000“ unter einer Position: Stückpreisangabe, kein Summenblock
+        if art in ("N", "B", "T", "S") or FUSS.search(z) or (mit_kopf and pos and re.match(r"\s*[^\W\d][\w-]+:\s*$", z)):
+            in_tabelle = not mit_kopf      # Summenblock, Fußzeile oder neuer Abschnitt („Zahlungsbedingungen:“)
             continue
         p = _position(i, z)
         if p is None and zahlen(z):
@@ -605,7 +607,7 @@ def erkenne(text: str) -> Vorschlag:
             pos.append(p)
             belegt.add(i)
         elif p is None and pos and mit_kopf and pos[-1].i >= i - 8 and not re.search(r"\d+[.,]\d{2}\b", z):
-            pos[-1].bezeichnung = _anfuegen(pos[-1].bezeichnung, " ".join(z.split()))
+            pos[-1].bezeichnung = _anfuegen(pos[-1].bezeichnung, " ".join(z.split())).strip()
     if any(p.geprueft for p in pos):
         ungeprueft = [p for p in pos if not p.geprueft]
         pos = [p for p in pos if p.geprueft]
