@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 from . import mustang, ocr
 from .cii import bette_ein, erzeuge_cii
-from .modell import Partei, SummenFehler, summenabgleich
-from .vorlagen import OCR_HINWEIS, STANDARD, VorlagenFehler, lade_vorlagen, lies_rechnung
+from .modell import Partei, SummenFehler, de, summenabgleich
+from .vorlagen import MIN_ZEICHEN, OCR_HINWEIS, STANDARD, pdf_text, lade_vorlagen, lies_rechnung
 log = logging.getLogger("erechnung")
 @dataclass
 class Konfig:
@@ -91,12 +91,14 @@ def vorschlag_text(pdf: Path) -> str:
     """Abschnitt für die .fehler.txt; ohne Texterkennung (würde die Verarbeitung verdoppeln). Wirft nie."""
     try:
         from .generisch import vorschlag_aus_pdf
+        if len(re.findall(r"\w", pdf_text(pdf))) < MIN_ZEICHEN:
+            return "\n--- Vorschlag der generischen Erkennung (nicht verwendet) ---\nkein Vorschlag: PDF ohne Text\n"
         v = vorschlag_aus_pdf(pdf)
         kopf = "\n--- Vorschlag der generischen Erkennung (nicht verwendet) ---\n"
         if v.nummer is None and v.summe_brutto is None:
-            return kopf + f"kein Vorschlag: {'PDF ohne Text' if 'kein Text' in v.grund else v.grund or 'nichts erkannt'}\n"
+            return kopf + f"kein Vorschlag: {v.grund or 'nichts erkannt'}\n"
         return kopf + (f"Rechnungsnummer: {v.nummer or '-'}\nDatum: {v.datum.strftime('%d.%m.%Y') if v.datum else '-'}\n"
-                       f"Brutto: {v.summe_brutto if v.summe_brutto is not None else '-'}\n"
+                       f"Brutto: {de(v.summe_brutto) + ' EUR' if v.summe_brutto is not None else '-'}\n"
                        f"bestätigt: {'ja' if v.bestaetigt else 'nein'}{'' if v.bestaetigt else f' ({v.grund})'}\n"
                        "Nur ein Hinweis zum Anlernen einer Vorlage, es wurde keine E-Rechnung erzeugt.\n")
     except Exception as e:
@@ -110,7 +112,7 @@ def bearbeite(pdf: Path, k: Konfig) -> tuple[bool, str]:
         grund = str(e) if isinstance(e, ValueError) else traceback.format_exc()
         log.warning("%s: %s", pdf.name, grund)
         basis = _frei(k.fehler, pdf.stem, ".pdf", ".fehler.txt")
-        zusatz = vorschlag_text(pdf) if isinstance(e, VorlagenFehler) else ""
+        zusatz = vorschlag_text(pdf) if str(e).startswith("keine Vorlage passt") else ""
         (k.fehler / f"{basis}.fehler.txt").write_text(f"{grund}\n{zusatz}", encoding="utf-8")
         os.replace(pdf, k.fehler / f"{basis}.pdf")
         return False, grund

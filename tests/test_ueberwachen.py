@@ -186,7 +186,7 @@ def test_fehler_mit_vorschlag(k):
     schritt(k)
     txt = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
     assert "keine Vorlage passt" in txt and "Vorschlag der generischen Erkennung (nicht verwendet)" in txt
-    assert "FR-2026-7" in txt and "119.00" in txt and "bestätigt: ja" in txt
+    assert "FR-2026-7" in txt and "119,00 EUR" in txt and "bestätigt: ja" in txt
     assert len(list(k.fehler.glob("*.pdf"))) == 1 and namen(k.ausgabe) == []
 
 def test_vorschlag_ohne_text(k):
@@ -215,3 +215,12 @@ def test_cli_vorschlag(tmp_path):
     leer.write_bytes(pdf_aus_text(["Hallo"]))
     aus = subprocess.run([sys.executable, "-m", "erechnung", "vorschlag", str(leer)], capture_output=True, text=True, cwd=REPO)
     assert aus.returncode == 1 and json.loads(aus.stdout)["bestaetigt"] is False
+
+def test_andere_vorlagenfehler_ohne_vorschlag(k, monkeypatch):
+    from erechnung.vorlagen import VorlagenFehler
+    def mehrere(*a, **kw):
+        raise VorlagenFehler("mehrere Vorlagen: a, b")
+    monkeypatch.setattr("erechnung.ueberwachen.lies_rechnung", mehrere)
+    drucke(k, "\n".join(FREMD))
+    schritt(k)
+    assert next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8") == "mehrere Vorlagen: a, b\n"
