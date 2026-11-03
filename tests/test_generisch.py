@@ -156,3 +156,29 @@ Lindenweg 5 Datum 02.11.2026
 """
     v = erkenne(text + TABELLE + SUMMEN)
     assert (v.kaeufer.name, v.kaeufer.strasse, v.kaeufer.plz) == ("Praxis Dr. Erika Muster", "Lindenweg 5", "14467")
+
+
+def test_gutschrift_positiv_gedruckt_nicht_bestaetigt():
+    text = KOPF.replace("Rechnungsnr.", "Gutschriftnr.") + TABELLE + SUMMEN.replace("Gesamtbetrag", "Gutschriftbetrag")
+    v = erkenne(text)
+    assert v.summe_brutto == D("235.03")
+    assert not v.bestaetigt and "Gutschrift" in v.grund
+    v = erkenne("Gutschrift\n" + KOPF + TABELLE + SUMMEN)
+    assert not v.bestaetigt and "Gutschrift" in v.grund
+
+
+def test_zahlenkolonne_ist_keine_position_und_schnell():
+    import time
+    zeile = " ".join(f"{k},50" for k in range(200))
+    t = time.perf_counter()
+    v = erkenne(KOPF + TABELLE + zeile + "\n" + SUMMEN)
+    assert time.perf_counter() - t < 1
+    assert len(v.positionen) == 2
+
+
+def test_kaputte_pdf_wirft_nicht(tmp_path):
+    from erechnung.generisch import vorschlag_aus_pdf
+    pdf = tmp_path / "kaputt.pdf"
+    pdf.write_bytes(b"%PDF-1.4 kein echtes PDF \x00\xff")
+    v = vorschlag_aus_pdf(pdf)
+    assert not v.bestaetigt and "PDF nicht lesbar" in v.grund

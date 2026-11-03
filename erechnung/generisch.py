@@ -141,6 +141,9 @@ NUMMER_KOPF = re.compile(   # Überschrift: „Rechnung RE-1“, „Handelsrechn
     r"^\s*[\w-]*(?:rechnung|invoice|gutschrift|facture|avoir|credit\s?note)[\w-]*"
     r"(?:(?:\s*(?:\([^)]*\)|\s[^\W\d]+)){0,4}?(?P<nr>\s*\b(?:nr|no|n°)\b\.?))?[\s:#]*(?P<w>\S+)", re.I)
 NUMMER_MITTE = re.compile(r"(?<![\w-])(?:rechnung|invoice|gutschrift|facture)\b[\s:#]*(?P<w>\S+)", re.I)
+GUTSCHRIFT = re.compile(   # Beleg ist Gutschrift/Storno: Überschrift oder Nummernbeschriftung
+    r"^\s*(?:gutschrift|credit\s?note|avoir|storno(?:rechnung)?)\b"
+    r"|\b(?:gutschrift|credit\s?note|storno)s?[-\s]?(?:nr|nummer|no|number|n°)\b", re.I | re.M)
 NICHT_NUMMER = _re(r"kunden", r"auftrag", r"bestell", r"order", r"liefer", r"steuer", r"ust", r"vat\b", r"kundennr",
                    r"zu\s+rechnung", r"bezug", r"angebot")
 DATUM_STARK = _re(r"(?:rechnungs|beleg|ausstellungs|invoice\s?|issue\s?)[-\s]?(?:datum|date)", r"issued(?:\s+(?:at|on))?",
@@ -325,6 +328,8 @@ class _Zeile:
 
 def _position(i: int, z: str) -> _Zeile | None:
     zs = zahlen(z)
+    if len(zs) > 40:
+        return None    # keine Positionszeile (Zahlenkolonne); die Suche unten ist kubisch in der Zahl der Werte
     bt = [x for x in zs if x.betrag]
     if not bt:
         return None
@@ -728,6 +733,8 @@ def erkenne(text: str) -> Vorschlag:
         v.grund = "Rechnungsdatum mehrdeutig"
     elif v.summe_brutto < 0:
         v.grund = "negative Summen (Gutschrift/Storno): Vorzeichen für die E-Rechnung prüfen"
+    elif GUTSCHRIFT.search(text):
+        v.grund = "Gutschrift: Vorzeichen prüfen (Beträge positiv gedruckt)"
     elif brutto_pos:
         v.grund = "Positionen mit Bruttopreisen (inkl. USt.): Netto je Position nicht gedruckt"
     elif any(s is None for s in zuordnung):
@@ -754,7 +761,10 @@ def _punkte(v: Vorschlag) -> int:
 def vorschlag_aus_pdf(pdf: Path, ocr: Callable[[Path], Iterable[tuple[str, str]]] | None = None) -> Vorschlag:
     """Text (mit und ohne Layout) bzw. Lesarten der Texterkennung; die erste bestätigte Lesart gewinnt, sonst die
     mit den meisten gefundenen Feldern. Bei Texterkennung muss die Nummer zweimal im Text stehen (Gegenprobe)."""
-    text = pdf_text(pdf)
+    try:
+        text = pdf_text(pdf)
+    except Exception as e:    # pdfplumber/pdfminer: beschädigte oder keine PDF-Datei
+        return Vorschlag(grund=f"PDF nicht lesbar: {type(e).__name__}")
     vorschlaege = []
     if len(re.findall(r"\w", text)) >= MIN_ZEICHEN:
         for name, t in (("Layout", lambda: pdf_text(pdf, layout=True)), ("Text", lambda: text)):
