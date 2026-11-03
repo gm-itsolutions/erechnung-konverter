@@ -175,3 +175,43 @@ def test_ohne_tesseract(k):
     (k.eingang / "edge.pdf").write_bytes(bild_pdf(pdf_aus_text(["x"])))
     schritt(k)
     assert "kein Text" in next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
+
+FREMD = ["Muster Handel GmbH", "Weg 1, 12345 Teststadt", "", "Rechnung Nr. FR-2026-7", "Rechnungsdatum: 03.11.2026", "",
+         "Kunde: Beispiel Handel GmbH", "Hauptstraße 5", "19348 Perleberg", "",
+         "Pos Bezeichnung Menge Einzelpreis Betrag", "1 Beratung 2,00 50,00 100,00",
+         "Nettosumme 100,00 EUR", "19% USt 19,00 EUR", "Gesamtbetrag 119,00 EUR"]
+
+def test_fehler_mit_vorschlag(k):
+    drucke(k, "\n".join(FREMD))
+    schritt(k)
+    txt = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
+    assert "keine Vorlage passt" in txt and "Vorschlag der generischen Erkennung (nicht verwendet)" in txt
+    assert "FR-2026-7" in txt and "119.00" in txt and "bestätigt: ja" in txt
+    assert len(list(k.fehler.glob("*.pdf"))) == 1 and namen(k.ausgabe) == []
+
+def test_vorschlag_ohne_text(k):
+    drucke(k, " ")
+    schritt(k)
+    txt = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
+    assert "kein Vorschlag" in txt
+
+def test_vorschlag_kaputt_stoert_nicht(k, monkeypatch):
+    def kaputt(*a, **kw):
+        raise RuntimeError("kaputt")
+    monkeypatch.setattr("erechnung.generisch.vorschlag_aus_pdf", kaputt)
+    drucke(k, "\n".join(FREMD))
+    schritt(k)
+    txt = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
+    assert "keine Vorlage passt" in txt and "Vorschlag" not in txt
+    assert len(list(k.fehler.glob("*.pdf"))) == 1
+
+def test_cli_vorschlag(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(pdf_aus_text(FREMD))
+    aus = subprocess.run([sys.executable, "-m", "erechnung", "vorschlag", str(pdf)], capture_output=True, text=True, cwd=REPO)
+    d = json.loads(aus.stdout)
+    assert aus.returncode == 0 and d["nummer"] == "FR-2026-7" and d["summe_brutto"] == "119.00" and d["bestaetigt"] is True
+    leer = tmp_path / "leer.pdf"
+    leer.write_bytes(pdf_aus_text(["Hallo"]))
+    aus = subprocess.run([sys.executable, "-m", "erechnung", "vorschlag", str(leer)], capture_output=True, text=True, cwd=REPO)
+    assert aus.returncode == 1 and json.loads(aus.stdout)["bestaetigt"] is False

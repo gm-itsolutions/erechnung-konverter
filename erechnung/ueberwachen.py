@@ -8,7 +8,7 @@ from typing import Callable, Iterable
 from . import mustang, ocr
 from .cii import bette_ein, erzeuge_cii
 from .modell import Partei, SummenFehler, summenabgleich
-from .vorlagen import OCR_HINWEIS, STANDARD, lade_vorlagen, lies_rechnung
+from .vorlagen import OCR_HINWEIS, STANDARD, VorlagenFehler, lade_vorlagen, lies_rechnung
 log = logging.getLogger("erechnung")
 @dataclass
 class Konfig:
@@ -87,6 +87,21 @@ def verarbeite(pdf: Path, k: Konfig) -> Path:
     os.replace(pdf, k.originale / f"{orig}.pdf")
     log.info("%s → %s (Vorlage %s%s)", pdf.name, basis, r.vorlage, f", {OCR_HINWEIS}, Lesart {r.ocr_lesart}" if r.ocr_text else "")
     return k.ausgabe / f"{basis}.pdf"
+def vorschlag_text(pdf: Path) -> str:
+    """Abschnitt für die .fehler.txt; ohne Texterkennung (würde die Verarbeitung verdoppeln). Wirft nie."""
+    try:
+        from .generisch import vorschlag_aus_pdf
+        v = vorschlag_aus_pdf(pdf)
+        kopf = "\n--- Vorschlag der generischen Erkennung (nicht verwendet) ---\n"
+        if v.nummer is None and v.summe_brutto is None:
+            return kopf + f"kein Vorschlag: {'PDF ohne Text' if 'kein Text' in v.grund else v.grund or 'nichts erkannt'}\n"
+        return kopf + (f"Rechnungsnummer: {v.nummer or '-'}\nDatum: {v.datum.strftime('%d.%m.%Y') if v.datum else '-'}\n"
+                       f"Brutto: {v.summe_brutto if v.summe_brutto is not None else '-'}\n"
+                       f"bestätigt: {'ja' if v.bestaetigt else 'nein'}{'' if v.bestaetigt else f' ({v.grund})'}\n"
+                       "Nur ein Hinweis zum Anlernen einer Vorlage, es wurde keine E-Rechnung erzeugt.\n")
+    except Exception as e:
+        log.warning("%s: Vorschlag der generischen Erkennung fehlgeschlagen: %s", pdf.name, e)
+        return ""
 def bearbeite(pdf: Path, k: Konfig) -> tuple[bool, str]:
     """Erfolg → (True, Pfad); jeder Fehler → Original + .fehler.txt nach Fehler, (False, Grund)."""
     try:
@@ -95,7 +110,8 @@ def bearbeite(pdf: Path, k: Konfig) -> tuple[bool, str]:
         grund = str(e) if isinstance(e, ValueError) else traceback.format_exc()
         log.warning("%s: %s", pdf.name, grund)
         basis = _frei(k.fehler, pdf.stem, ".pdf", ".fehler.txt")
-        (k.fehler / f"{basis}.fehler.txt").write_text(f"{grund}\n", encoding="utf-8")
+        zusatz = vorschlag_text(pdf) if isinstance(e, VorlagenFehler) else ""
+        (k.fehler / f"{basis}.fehler.txt").write_text(f"{grund}\n{zusatz}", encoding="utf-8")
         os.replace(pdf, k.fehler / f"{basis}.pdf")
         return False, grund
 def schritt(k: Konfig) -> int:
