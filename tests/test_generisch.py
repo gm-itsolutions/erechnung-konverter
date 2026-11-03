@@ -144,3 +144,15 @@ def test_lexware_echt(nummer):
     soll = betraege((Path(DATEN) / f"{nummer}.lexware.xml").read_bytes())
     assert v.bestaetigt, v.grund
     assert (v.nummer, v.summe_netto, v.summe_brutto) == (soll["nummer"], soll["netto"], soll["brutto"])
+
+
+def test_kaeufer_im_text_ohne_spalten():
+    """Texterkennung/Text ohne Layout: Kopffelder rechts stehen in derselben Zeile wie die Anschrift."""
+    text = """Muster Software GmbH
+Hauptstraße 1 - 10115 Berlin - info@example.org
+Praxis Dr. Erika Muster Rechnung Nr. RE-2026-17
+Lindenweg 5 Datum 02.11.2026
+14467 Potsdam Kunden-Nr. K100
+"""
+    v = erkenne(text + TABELLE + SUMMEN)
+    assert (v.kaeufer.name, v.kaeufer.strasse, v.kaeufer.plz) == ("Praxis Dr. Erika Muster", "Lindenweg 5", "14467")

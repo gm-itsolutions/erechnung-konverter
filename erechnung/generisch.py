@@ -441,6 +441,15 @@ STOP = _re(r"\brechnung", r"\binvoice\b", r"\bdatum\b", r"\bdate\b", r"\btel\b",
            r"\bseite\b", r"\bnr\b", r"\bnummer\b", r"www\.", r"\biban\b", r"\bust\b", r"\bsteuer-?(?:nummer|nr)")
 
 
+KOPFFELD_ENDE = re.compile(   # „Firma GmbH  Rechnungsnummer B-1“, „14641 Ort  Lieferdatum 30.10.2026“ (Text ohne Layout)
+    r"\s+(?:[^\W\d][\w.\-]*:\s*\S+|(?:" + "|".join(x.pattern for x in (NUMMER_LABEL, DATUM_LABEL, LEISTUNG_LABEL)) +
+    r"|kunden-?(?:nr|nummer)\b\.?|(?<![\w-])(?:rechnung|invoice|gutschrift|facture)\b|vom(?=\s+\d))[\s:#]*\S.*)\s*$", re.I)
+
+
+def _ohne_kopffeld(c: str) -> str:
+    return KOPFFELD_ENDE.sub("", c)
+
+
 def _zellen(z: str) -> list[tuple[int, str]]:
     return [(m.start(), m.group()) for m in re.finditer(r"\S+(?: \S+)*", z)]
 
@@ -475,7 +484,8 @@ def _block(zeilen: list[str], i: int, a: int, zelle: str) -> tuple[list[str], in
         if links and links[-1].rstrip().endswith(":"):
             ref = min(ref, next(s for s, x in zellen if x is links[-1]))
         fuss = fuss or bool(FUSS.search(zeilen[j]) and not STOP.search(c))
-        c = re.sub(r"\s+[^\W\d][\w.\-]*:\s*\S+\s*$", "", c)   # „Firma GmbH Datum: 02.11.2026“ (Text ohne Layout)
+        if not re.search(r"@|www\.|·|\|", c):   # Absenderzeile bleibt Absenderzeile
+            c = _ohne_kopffeld(c)
         if (m := re.match(r"([^:]{1,40}):\s*(.*)", c)) and not _label(c):
             if not ANSCHRIFT_FELD.search(m.group(1)) or re.search(r"\d", m.group(1)):
                 if re.fullmatch(r"\S+", m.group(2)):
@@ -502,6 +512,7 @@ def _kaeufer(zeilen: list[str]) -> tuple[Partei | None, str]:
             verkaeufer.add(" ".join(n.split()).casefold())
     for i, z in enumerate(zeilen):
         for a, zelle in _zellen(z):
+            zelle = _ohne_kopffeld(zelle)
             if not (m := PLZ_RE.match(zelle)) or re.search(r"\d{3,}", m.group(2)):
                 continue
             block, j, fuss, ref = _block(zeilen, i, a, zelle)
