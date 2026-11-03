@@ -140,6 +140,7 @@ NUMMER_LABEL = _re(
 NUMMER_KOPF = re.compile(   # Überschrift: „Rechnung RE-1“, „Handelsrechnung (380) Nr. 471102“, „Rechnung des Versicherers Nr. 1“
     r"^\s*[\w-]*(?:rechnung|invoice|gutschrift|facture|avoir|credit\s?note)[\w-]*"
     r"(?:(?:\s*(?:\([^)]*\)|\s[^\W\d]+)){0,4}?(?P<nr>\s*\b(?:nr|no|n°)\b\.?))?[\s:#]*(?P<w>\S+)", re.I)
+NUMMER_MITTE = re.compile(r"(?<![\w-])(?:rechnung|invoice|gutschrift|facture)\b[\s:#]*(?P<w>\S+)", re.I)
 NICHT_NUMMER = _re(r"kunden", r"auftrag", r"bestell", r"order", r"liefer", r"steuer", r"ust", r"vat\b", r"kundennr",
                    r"zu\s+rechnung", r"bezug", r"angebot")
 DATUM_STARK = _re(r"(?:rechnungs|beleg|ausstellungs|invoice\s?|issue\s?)[-\s]?(?:datum|date)", r"issued(?:\s+(?:at|on))?",
@@ -169,6 +170,8 @@ UST_SUMME = _re(r"summe\s+(?:der\s+)?(?:ust|mwst|umsatzsteuer|steuer)", r"steuer
 BRUTTO = _re(r"brutto", r"gesamtbetrag", r"rechnungsbetrag", r"endbetrag", r"endsumme", r"gesamtsumme", r"zu\s+zahlen",
              r"zahlbetrag", r"gutschriftbetrag", r"rechnungssumme", r"\btotal\b", r"amount\s+due", r"balance\s+due",
              r"\bttc\b", r"\bgesamt\b", r"\bsumme\b", r"betrag\b")
+BRUTTO_STARK = _re(r"brutto", r"gesamtbetrag", r"rechnungsbetrag", r"rechnungssumme", r"endbetrag", r"endsumme",
+                   r"\btotal\b", r"\bttc\b", r"inkl", r"incl")
 UEBERTRAG = _re(r"übertrag", r"uebertrag", r"carried\s+forward", r"brought\s+forward", r"transfer")
 RABATT = _re(r"rabatt", r"nachlass", r"abzüglich", r"abzgl", r"abschlag", r"discount", r"remise", r"allowance")
 ZUSCHLAG = _re(r"zuschlag", r"versandkosten", r"fracht", r"surcharge")
@@ -217,10 +220,16 @@ def _darunter(zeilen: list[str], i: int, a: int, e: int, pruefe: Callable[[str],
     return None
 
 
-def _nummer(zeilen: list[str]) -> tuple[str | None, str, bool]:
-    """(Nummer, Fundstelle, eindeutig). Beschriftete Fundstellen zählen 3, Überschriften („Rechnung RE-1“) 1."""
+def _nummer(zeilen: list[str]) -> tuple[str | None, str, str]:
+    """(Nummer, Fundstelle, Zweifel – leer, wenn sicher). Punkte je Fundstelle: Beschriftung („Rechnungsnr.:“) und
+    „Rechnung Nr. …“ 3, Überschrift „Rechnung RE-1“ (auch mitten in der Zeile) und Beschriftung mitten im Fließtext 1.
+    Sicher ab 2 Punkten: eine unbeschriftete Nummer muss mindestens zweimal vorkommen (Kopf, Seitenkopf, Anschriftzeile)."""
     punkte: dict[str, int] = {}
     fund: dict[str, str] = {}
+
+    def neu(w, z, p):
+        punkte[w] = punkte.get(w, 0) + p
+        fund.setdefault(w, z.strip())
     for i, z in enumerate(zeilen):
         for m in NUMMER_LABEL.finditer(z):
             if NICHT_NUMMER.search(z[max(0, m.start() - 12):m.start()]):
@@ -230,16 +239,25 @@ def _nummer(zeilen: list[str]) -> tuple[str | None, str, bool]:
             if w is None and not re.match(r"[\s:#.]*\S*\d", z[m.end():]):
                 w = _darunter(zeilen, i, m.start(), m.end(), lambda s: (_token(s) or (None,))[0])
             if w:
-                punkte[w] = punkte.get(w, 0) + 3
-                fund.setdefault(w, z.strip())
-        if (m := NUMMER_KOPF.match(z)) and (t := _token(m.group("w"))):
-            punkte[t[0]] = punkte.get(t[0], 0) + (3 if m.group("nr") else 1)
-            fund.setdefault(t[0], z.strip())
+                prosa = len(re.findall(r"[^\W\d]{2,}", z[:m.start()])) >= 5
+                neu(w, z, 1 if prosa else 3)
+        for a, c in [(0, z)] + _zellen(z)[1:]:
+            if (m := NUMMER_KOPF.match(c)) and (t := _token(m.group("w"))) and not (
+                    m.group("nr") and NICHT_NUMMER.search(c[:m.start("nr")])):   # „Rechnung gemäß Bestellung Nr. …“
+                neu(t[0], z, 3 if m.group("nr") else 1)
+                break
+        else:   # „Kunde GmbH  Rechnung: 4711-26“, Seitenkopf „Firma · Rechnung 4711-26 vom …“: je Fundstelle 1 Punkt
+            for m in NUMMER_MITTE.finditer(z):
+                if m.start() and not NUMMER_LABEL.search(z) and not NICHT_NUMMER.search(z[max(0, m.start() - 12):m.start()]) \
+                        and len(re.findall(r"[^\W\d]{2,}", z[:m.start()])) < 5 and (t := _token(m.group("w"))):
+                    neu(t[0], z, 1)
     if not punkte:
-        return None, "", False
+        return None, "", ""
     best = max(punkte.values())
     top = [w for w, p in punkte.items() if p == best]
-    return top[0], fund[top[0]], len(top) == 1
+    zweifel = "Rechnungsnummer mehrdeutig" if len(top) > 1 else \
+        "Rechnungsnummer nur schwach belegt (ohne Beschriftung)" if best < 2 else ""
+    return top[0], fund[top[0]], zweifel
 
 
 def _datumsfeld(zeilen: list[str], label: re.Pattern, nicht: re.Pattern | None = None, stark: re.Pattern | None = None,
@@ -349,8 +367,9 @@ def _art(z: str) -> str | None:
     """Art einer Summenzeile: T (Steuer mit Satz), N, S (Steuersumme), B, R, Z, U (Übertrag) oder None."""
     if UEBERTRAG.search(z):
         return "U"
-    if STEUER_WORT.search(z) and (any(x.prozent for x in zahlen(z)) or _steuer_tabelle(z)):
-        return "T"
+    rz = RABATT.search(z) or ZUSCHLAG.search(z)
+    if not rz and (s := _steuerzeile(z)) and (STEUER_WORT.search(z) or s[2] is not None):
+        return "T"     # Steuerzeile mit Satz; ohne Steuerwort nur arithmetisch belegt („7 %  160,00  11,20“)
     if NETTO.search(z) and not re.search(r"(?i)brutto|incl|inkl|ttc", z):
         return "N"
     if UST_SUMME.search(z):
@@ -388,6 +407,8 @@ def _steuerzeile(z: str) -> tuple[Decimal, Decimal, Decimal | None] | None:
     if pz and bt:
         satz, steuer = pz[0].wert, bt[-1].wert
         basis = next((b.wert for b in bt[:-1] if abs(runde(b.wert * satz / 100) - steuer) <= CENT), None)
+        if basis is None and len(bt) > 1:
+            return None    # mehrere Beträge, keiner passt als Basis: keine Steuerzeile (z. B. Position)
         return satz, steuer, basis
     if (t := _steuer_tabelle(z)):
         return t[0], t[2], t[1]
@@ -545,12 +566,17 @@ def erkenne(text: str) -> Vorschlag:
     v.faellig, v.fundstellen["faellig"], _ = _datumsfeld(zeilen, FAELLIG_LABEL)
     v.kaeufer, v.fundstellen["kaeufer"] = _kaeufer(text.splitlines())
 
-    # Positionen: Zeilen in Tabellen (nach einer Kopfzeile) bzw. ohne Kopfzeile nur arithmetisch geprüfte
-    mit_kopf = any(len(set(w.lower() for w in KOPF_WORT.findall(z))) >= 2 and not betraege(z) for z in zeilen)
+    # Positionen: Zeilen in Tabellen (nach einer Kopfzeile) bzw. ohne Kopfzeile nur arithmetisch geprüfte.
+    # Steht der Betrag erst in der Folgezeile (Umbruch in der Position), werden bis zu zwei Zeilen verbunden.
+    kopf = [len(set(w.lower() for w in KOPF_WORT.findall(z))) >= 2 and not betraege(z) for z in zeilen]
+    mit_kopf = any(kopf)
     pos: list[_Zeile] = []
+    belegt: set[int] = set()
     in_tabelle = not mit_kopf
     for i, z in enumerate(zeilen):
-        if mit_kopf and len(set(w.lower() for w in KOPF_WORT.findall(z))) >= 2 and not betraege(z):
+        if i in belegt:
+            continue
+        if kopf[i]:
             in_tabelle = True
             continue
         if not in_tabelle:
@@ -562,8 +588,19 @@ def erkenne(text: str) -> Vorschlag:
             in_tabelle = not mit_kopf
             continue
         p = _position(i, z)
+        if p is None and zahlen(z):
+            for k in (1, 2):
+                folge = zeilen[i + 1:i + 1 + k]
+                if len(folge) < k or not betraege(folge[-1]) or any(_art(f) for f in folge) or \
+                        any((q := _position(i, f)) and q.geprueft for f in folge):
+                    continue
+                if (q := _position(i + k, z + "   " + "   ".join(folge))) and q.geprueft:
+                    p = q
+                    belegt.update(range(i + 1, i + 1 + k))
+                    break
         if p and (p.geprueft or (art is None and mit_kopf)):
             pos.append(p)
+            belegt.add(i)
         elif p is None and pos and mit_kopf and pos[-1].i >= i - 8 and not re.search(r"\d+[.,]\d{2}\b", z):
             pos[-1].bezeichnung = _anfuegen(pos[-1].bezeichnung, " ".join(z.split()))
     if any(p.geprueft for p in pos):
@@ -572,9 +609,9 @@ def erkenne(text: str) -> Vorschlag:
     else:
         ungeprueft = []
 
-    # Summenblock unterhalb der letzten Position
-    ab = max([p.i for p in pos + ungeprueft], default=-1) + 1
-    zone = [(i, zeilen[i], _art(zeilen[i])) for i in range(ab, len(zeilen))]
+    # Summenblock: alle Zeilen ab der ersten Position, die keine geprüfte Position sind
+    ab = min([p.i for p in pos], default=0)
+    zone = [(i, zeilen[i], _art(zeilen[i])) for i in range(ab, len(zeilen)) if i not in {p.i for p in pos}]
     steuern: dict[Decimal, tuple[Decimal, Decimal | None, str, bool]] = {}
     for i, z, art in zone:
         if art == "T" and (s := _steuerzeile(z)):
@@ -602,13 +639,13 @@ def erkenne(text: str) -> Vorschlag:
         if all(x is not None for x in basen) and sum(basen) + ust == b:
             paar = (b - ust, "berechnet: Brutto − Steuer", b, zb, i_b)
     if paar:
-        v.summe_netto, v.fundstellen["summe_netto"], v.summe_brutto, v.fundstellen["summe_brutto"], i_netto = paar
+        v.summe_netto, v.fundstellen["summe_netto"], v.summe_brutto, v.fundstellen["summe_brutto"], _ = paar
     else:
-        i_netto = len(zeilen)
         if kand["N"]:
             _, v.summe_netto, v.fundstellen["summe_netto"] = kand["N"][-1]
         if kand["B"]:
-            _, v.summe_brutto, v.fundstellen["summe_brutto"] = kand["B"][-1]
+            stark = [b for b in kand["B"] if BRUTTO_STARK.search(b[2])] or kand["B"]
+            _, v.summe_brutto, v.fundstellen["summe_brutto"] = stark[-1]
     v.steuern = {s: w[0] for s, w in steuern.items()}
     if v.steuern:
         v.summe_ust = ust
@@ -617,8 +654,14 @@ def erkenne(text: str) -> Vorschlag:
         _, v.summe_ust, v.fundstellen["summe_ust"] = kand["S"][-1]
 
     # Nachlässe/Zuschläge zwischen Positionen und Netto, nur wenn die Rechnung damit aufgeht
-    nl = [Nachlass(abs(w), " ".join(re.sub(r"[-−]?\d[\d.,]*\s*%?|€|EUR", "", z).split()), None, k == "Z")
-          for k in "RZ" for i, w, z in kand[k] if i < i_netto and not SUMMENWORT.search(z) and w]
+    nl = []
+    for k in "RZ":
+        for i, w, z in kand[k]:
+            if SUMMENWORT.search(z) or not w:
+                continue
+            satz = next((_satz(x.wert) for x in zahlen(z) if x.prozent and _satz(x.wert) in v.steuern), None) \
+                if STEUER_WORT.search(z) else None
+            nl.append(Nachlass(abs(w), " ".join(re.sub(r"[-−]?\d[\d.,]*\s*%?|€|EUR|\(\w\)", "", z).split()), satz, k == "Z"))
     summe_pos = sum((p.netto for p in pos), Decimal(0))
     ziel = v.summe_netto
     if ziel is not None and nl and summe_pos - sum(n.betrag for n in nl if not n.zuschlag) \
@@ -663,8 +706,8 @@ def erkenne(text: str) -> Vorschlag:
     fehlt = [f for f in ("nummer", "datum", "summe_netto", "summe_brutto") if getattr(v, f) in (None, "")]
     if fehlt:
         v.grund = f"nicht gefunden: {', '.join(fehlt)}"
-    elif not eindeutig["nummer"]:
-        v.grund = "Rechnungsnummer mehrdeutig"
+    elif eindeutig["nummer"]:
+        v.grund = eindeutig["nummer"]
     elif not eindeutig["datum"]:
         v.grund = "Rechnungsdatum mehrdeutig"
     elif v.summe_brutto < 0:
