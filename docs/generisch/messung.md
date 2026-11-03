@@ -77,6 +77,10 @@ Echte Lexware-Rechnungen: unverändert 4 von 4 über die Vorlage (der produktive
 - Bestätigt Bedingung: Nummer und Datum gefunden, Nummer beschriftet oder an zwei Stellen belegt, Steuerzeilen
   arithmetisch stimmig, `modell.summenabgleich` besteht.
 - Nur 3 von 204 bestätigten haben ein Nicht-Kernfeld falsch (Fehlklassen unten).
+- **Abweichung vom Planziel „bestätigt, aber falsch = 0“:** Für die Kernfelder ist es erreicht
+  (`bestaetigt_kern_falsch` = 0), der Gesamtwert ist 3. Alle drei betreffen Nicht-Kernfelder (Käufername ohne
+  Leerzeichen im PDF-Text; ein öffentliches Muster ohne Netto je Zeile im Soll). Akzeptiert, weil die Erkennung nur
+  Vorschläge macht und nie eine E-Rechnung erzeugt.
 
 ### Fehlklassen
 

@@ -91,7 +91,10 @@ def vorschlag_text(pdf: Path) -> str:
     """Abschnitt für die .fehler.txt; ohne Texterkennung (würde die Verarbeitung verdoppeln). Wirft nie."""
     try:
         from .generisch import vorschlag_aus_pdf
-        if len(re.findall(r"\w", pdf_text(pdf))) < MIN_ZEICHEN:
+        text = pdf_text(pdf)
+        if len(text) > 100_000:
+            return "\n--- Vorschlag der generischen Erkennung (nicht verwendet) ---\nkein Vorschlag: Text zu lang\n"
+        if len(re.findall(r"\w", text)) < MIN_ZEICHEN:
             return "\n--- Vorschlag der generischen Erkennung (nicht verwendet) ---\nkein Vorschlag: PDF ohne Text\n"
         v = vorschlag_aus_pdf(pdf)
         kopf = "\n--- Vorschlag der generischen Erkennung (nicht verwendet) ---\n"

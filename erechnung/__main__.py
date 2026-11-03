@@ -4,6 +4,8 @@ from pathlib import Path
 from . import __version__
 def _vorschlag(pdf: Path, mit_ocr: bool) -> int:
     import dataclasses, json, tempfile
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows cp1252 bei umgeleiteter Ausgabe
     from datetime import date
     from decimal import Decimal
     from functools import partial

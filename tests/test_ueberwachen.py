@@ -195,6 +195,11 @@ def test_vorschlag_ohne_text(k):
     txt = next(k.fehler.glob("*.fehler.txt")).read_text(encoding="utf-8")
     assert "kein Vorschlag" in txt
 
+def test_vorschlag_text_zu_lang(k, monkeypatch):
+    from erechnung import ueberwachen
+    monkeypatch.setattr(ueberwachen, "pdf_text", lambda p: "wort " * 30_000)
+    assert "kein Vorschlag: Text zu lang" in ueberwachen.vorschlag_text(Path("x.pdf"))
+
 def test_vorschlag_kaputt_stoert_nicht(k, monkeypatch):
     def kaputt(*a, **kw):
         raise RuntimeError("kaputt")
