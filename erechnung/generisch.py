@@ -420,7 +420,7 @@ def _satz(s: Decimal) -> Decimal:
 
 
 # ---------------------------------------------------------------- Käufer
-PLZ_RE = re.compile(r"^(?:(?:D|DE|A|AT|CH|F|FR|NL|B|L)[- ])?(\d{4,5})\s*([A-ZÄÖÜ][\w\-. ()]*)$")
+PLZ_RE = re.compile(r"^(?:(?:D|DE|A|AT|CH|F|FR|NL|B|L)[- ]?)?(\d{4,5})\s*([A-ZÄÖÜ][\w\-. ()]*)$")
 ABSENDER = re.compile(r"[·•●|,–]\s*(?:[A-Z]{1,2}[- ])?\d{4,5}\s+[A-ZÄÖÜ]")   # „Firma · Weg 1 · 12345 Ort“
 KAEUFER_LABEL = _re(r"rechnungsempfänger", r"rechnungsadresse", r"(?<!ver)käufer", r"leistungsempfänger", r"bill\s+to",
                     r"invoice\s+to", r"buyer", r"(?<![\w-])kunde\b", r"customer", r"(?<!waren)empfänger", r"client",
@@ -497,6 +497,9 @@ def _kaeufer(zeilen: list[str]) -> tuple[Partei | None, str]:
     kopf = next((" ".join(z.split()) for z in zeilen if z.strip()), "").casefold()
     fusszeilen = " ".join(z for z in zeilen if FUSS.search(z) or ABSENDER.search(z) or "·" in z or "|" in z).casefold()
     bloecke, verkaeufer = [], set()
+    for i, z in enumerate(zeilen[:-1]):    # „Verkäufer:“ allein in der Zeile, Name darunter (auch ohne erkannte PLZ)
+        if VERKAEUFER_LABEL.search(z) and _label(z.strip()) and (n := next((x for x in zeilen[i + 1:] if x.strip()), "")):
+            verkaeufer.add(" ".join(n.split()).casefold())
     for i, z in enumerate(zeilen):
         for a, zelle in _zellen(z):
             if not (m := PLZ_RE.match(zelle)) or re.search(r"\d{3,}", m.group(2)):
