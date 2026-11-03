@@ -169,7 +169,7 @@ UST_SUMME = _re(r"summe\s+(?:der\s+)?(?:ust|mwst|umsatzsteuer|steuer)", r"steuer
                 r"(?:vat|tax)\s+(?:total|amount)", r"umsatzsteuer\s+gesamt", r"^\s*(?:mwst|ust|umsatzsteuer)\.?\s*:?\s*[-\d]")
 BRUTTO = _re(r"brutto", r"gesamtbetrag", r"rechnungsbetrag", r"endbetrag", r"endsumme", r"gesamtsumme", r"zu\s+zahlen",
              r"zahlbetrag", r"gutschriftbetrag", r"rechnungssumme", r"\btotal\b", r"amount\s+due", r"balance\s+due",
-             r"\bttc\b", r"\bgesamt\b", r"\bsumme\b", r"betrag\b")
+             r"\bttc\b", r"\bgesamt\b", r"\bsumme\b", r"betrag\b", r"\bpayable\b")
 BRUTTO_STARK = _re(r"brutto", r"gesamtbetrag", r"rechnungsbetrag", r"rechnungssumme", r"endbetrag", r"endsumme",
                    r"\btotal\b", r"\bttc\b", r"inkl", r"incl")
 UEBERTRAG = _re(r"übertrag", r"uebertrag", r"carried\s+forward", r"brought\s+forward", r"transfer")
@@ -352,7 +352,7 @@ def _position(i: int, z: str) -> _Zeile | None:
         saetze = [x.wert for x in zs if id(x) not in genutzt and x.start > ep.start and (x.prozent or x.stellen in (0, 2))
                   and 0 <= x.wert <= 30]
         m = re.match(r"\s*([^\W\d][\w.²³()/]*)", z[q.ende:])
-        einheit = m.group(1) if m and len(m.group(1)) <= 8 else ""
+        einheit = m.group(1) if m and (m.group(1).lower() in EINHEITEN or len(m.group(1)) <= 4) else ""   # nicht „Design“
         vorne = re.sub(r"^\s*\d{1,4}[.)]?\s+", "", z[:min(q.start, ep.start)])
         bez = vorne if vorne.strip() else z[q.ende + (m.end() if einheit else 0):ep.start]
         return _Zeile(i, z, q.wert, einheit, ep.wert, netto.wert, rab.wert if rab else None, saetze, True,
