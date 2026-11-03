@@ -50,12 +50,13 @@
       <section class="card">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Art</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Art</th><th>Status</th><th><span class="unsichtbar">Aktionen</span></th></tr></thead>
             <tbody id="vorlagen-liste"></tbody>
           </table>
         </div>
-        <div class="empty" id="vorlagen-leer" hidden>Noch keine Vorlage. „Neue Vorlage“ wählen.</div>
+        <div class="empty" id="vorlagen-leer" hidden>Noch keine eigene Vorlage. Mit ‚Neue Vorlage‘ eine Muster-Rechnung anlernen.</div>
       </section>
+      <div class="alert info uac" id="vorlagen-uac" hidden></div>
     </section>
 
     <section id="ansicht-anlernen" hidden>
@@ -64,9 +65,16 @@
         <div class="page-head">
           <h1 id="anlernen-titel">Vorlage anlernen</h1>
           <div class="actions kopf-aktionen">
+            <button type="button" class="btn btn-secondary" id="probe-wiederholen" hidden>Probelauf wiederholen</button>
             <button type="button" class="btn btn-primary" id="probelauf" disabled>Probelauf</button>
+            <button type="button" class="btn btn-primary" id="aktivieren" hidden disabled>Vorlage aktivieren</button>
           </div>
         </div>
+
+        <section id="probe" class="probe" aria-live="polite" hidden>
+          <h2 id="probe-titel">Probelauf</h2>
+          <div id="probe-inhalt"></div>
+        </section>
 
         <div class="lern-raster">
           <div>

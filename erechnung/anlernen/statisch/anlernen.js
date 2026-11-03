@@ -68,7 +68,11 @@ const NAME = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 // ---------- Zustand ----------
 const S = {stand: null, name: null, vorlage: null, muster: [], aktiv: null, seite: 1, gen: 0,
-  wp: {}, woerter: {}, werte: {}, uiSeite: {}, posOben: null, modus: null, zug: null, hover: null, timer: null};
+  wp: {}, woerter: {}, werte: {}, uiSeite: {}, posOben: null, modus: null, zug: null, hover: null, timer: null,
+  probe: null, probeNr: 0, spur: null, uac: null, erfolg: null};   // probe: {laeuft} | {ergebnis, haken}; uac: wartende Aktion
+const UAC_HINWEIS = "Windows fragt gleich nach einem Administrator-Konto. Ohne Freigabe bleibt die Vorlage inaktiv. "
+  + "Unter „Details“ muss als Befehlszeile „-m erechnung vorlage …“ stehen, sonst „Nein“ wählen.";
+const UAC_WARTEN = "Warte auf die Administrator-Freigabe in Windows …";
 const $ = (id) => document.getElementById(id);
 function el(tag, attr = {}, ...kinder) {
   const e = document.createElement(tag);
@@ -86,7 +90,8 @@ function auswahl(id, optionen, wert, onchange) {
   s.value = String(wert);
   return s;
 }
-function fehler(text) { const m = $("meldung"); m.textContent = text; m.hidden = false; }
+function meldung(text, art = "err") { const m = $("meldung"); m.className = `alert ${art}`; m.textContent = text; m.hidden = false; }
+const fehler = (text) => meldung(text, "err");
 function meldungWeg() { $("meldung").hidden = true; }
 async function mitMeldung(f) {
   meldungWeg();
@@ -99,15 +104,63 @@ const farbe = (n) => getComputedStyle(document.documentElement).getPropertyValue
 // ---------- Vorlagen und Entwürfe ----------
 async function ladeStand() {
   S.stand = await api("GET", "/api/stand");
-  const zeilen = [
-    ...S.stand.entwuerfe.map(n => [n, "Entwurf", el("span", {class: "pill info"}, "in Arbeit"), knopf("Öffnen", () => oeffneEntwurf(n).catch(e => fehler(e.message)))]),
-    ...S.stand.aktiv.map(n => [n, "angelernt", el("span", {class: "pill ok"}, "aktiv"), null]),
-    ...S.stand.deaktiviert.map(n => [n, "angelernt", el("span", {class: "pill"}, "deaktiviert"), null]),
-    ...S.stand.mitgeliefert.map(n => [n, "mitgeliefert", el("span", {class: "pill ok"}, "aktiv"), null])];
-  $("vorlagen-liste").replaceChildren(...zeilen.map(([n, art, pill, k]) => el("tr", {}, el("td", {class: "mono"}, n), el("td", {}, art), el("td", {}, pill), el("td", {}, k))));
-  $("vorlagen-leer").hidden = zeilen.length > 0;
+  renderVorlagen();
   $("muster-fehler").replaceChildren(el("option", {value: ""}, S.stand.fehlerordner.length ? "Datei wählen …" : "Fehler-Ordner ist leer"),
     ...S.stand.fehlerordner.map(d => el("option", {value: d}, d)));
+}
+function renderVorlagen() {
+  if (!S.stand) return;
+  const aus = S.uac !== null;     // während einer UAC-Abfrage keine zweite Aktion
+  const k = (text, f, gefahr = false) => el("button", {type: "button", class: `btn btn-sm ${gefahr ? "btn-danger" : "btn-secondary"}`,
+    disabled: aus, onclick: () => mitMeldung(f)}, text);
+  const zeile = (n, art, pill, ...aktionen) => el("tr", {}, el("td", {class: "mono"}, n), el("td", {}, art), el("td", {}, pill),
+    el("td", {}, el("div", {class: "zeilen-aktionen"}, ...aktionen)));
+  const st = S.stand;
+  $("vorlagen-liste").replaceChildren(
+    ...st.mitgeliefert.map(n => zeile(n, "mitgeliefert", el("span", {class: "pill info"}, "mitgeliefert"))),
+    ...st.aktiv.map(n => zeile(n, "angelernt", el("span", {class: "pill ok"}, "aktiv"),
+      k("Deaktivieren", () => verwalten(n, "deaktivieren")), k("Löschen", () => verwalten(n, "loeschen"), true))),
+    ...st.deaktiviert.map(n => zeile(n, "angelernt", el("span", {class: "pill warn"}, "deaktiviert"),
+      k("Reaktivieren", () => verwalten(n, "reaktivieren")), k("Löschen", () => verwalten(n, "loeschen"), true))),
+    ...st.entwuerfe.map(n => zeile(n, "angelernt", el("span", {class: "pill"}, "Entwurf"),
+      k("Bearbeiten", () => { location.hash = `#anlernen/${n}`; }), k("Für GM IT exportieren", () => exportieren(n)),
+      k("Entwurf löschen", () => entwurfLoeschen(n), true))));
+  $("vorlagen-leer").hidden = st.aktiv.length + st.deaktiviert.length + st.entwuerfe.length > 0;
+  const uac = $("vorlagen-uac");
+  uac.hidden = !(st.aktiv.length + st.deaktiviert.length);
+  uac.textContent = aus ? UAC_WARTEN : `Deaktivieren, Reaktivieren und Löschen: ${UAC_HINWEIS}`;
+}
+async function verwalten(name, aktion) {   // jede Verwaltungsaktion geht über UAC (F1), auch Löschen deaktivierter
+  if (aktion === "loeschen" && !confirm(`Vorlage „${name}“ endgültig löschen? Rechnungen in diesem Layout landen danach wieder im Fehler-Ordner.`)) return;
+  S.uac = name;
+  renderVorlagen();
+  let r;
+  try {
+    r = await api("POST", `/api/vorlage/${encodeURIComponent(name)}/${aktion}`, {});
+  } finally {
+    S.uac = null;
+    await ladeStand();
+  }
+  meldung(r.meldung, r.ok ? "ok" : "err");
+}
+async function entwurfLoeschen(name) {
+  if (!confirm(`Entwurf „${name}“ mit allen Mustern löschen?`)) return;
+  await api("DELETE", `/api/entwurf/${encodeURIComponent(name)}`);
+  if (S.name === name) {   // offener Entwurf: kein Speichern mehr hinterher
+    clearTimeout(S.timer);
+    Object.assign(S, {timer: null, name: null, vorlage: null, muster: [], aktiv: null, gen: S.gen + 1});
+    probeZurueck();
+  }
+  await ladeStand();
+}
+async function exportieren(name) {   // nur vorlage.yml, keine Muster-PDFs (F2)
+  const blob = await api("GET", `/api/entwurf/${encodeURIComponent(name)}/export`);
+  const d = new Date(), tag = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const url = URL.createObjectURL(blob), a = el("a", {href: url, download: `erechnung-vorlage-${name}-${tag}.yml`, hidden: true});
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function speichernJetzt() {
   if (S.timer === null) return;
@@ -116,7 +169,8 @@ async function speichernJetzt() {
   vorschlagErkennung();
   try { await api("PUT", `/api/entwurf/${S.name}`, S.vorlage); } catch (e) { fehler(`Speichern fehlgeschlagen: ${e.message}`); }
 }
-function speichern() {   // entprellt, ganze Vorlage
+function speichern() {   // entprellt, ganze Vorlage; jede Änderung macht den Probelauf ungültig
+  probeZurueck();
   clearTimeout(S.timer);
   S.timer = setTimeout(speichernJetzt, 500);
 }
@@ -125,6 +179,7 @@ async function oeffneEntwurf(name) {
   const d = await api("GET", `/api/entwurf/${encodeURIComponent(name)}`);
   // Muster-IDs werden nach dem Löschen neu vergeben: Zustand je Muster nie über das Öffnen hinaus behalten
   Object.assign(S, {wp: {}, woerter: {}, werte: {}, uiSeite: {}, posOben: null, modus: null, aktiv: null, gen: S.gen + 1});
+  probeZurueck();
   S.name = name;
   S.vorlage = d.vorlage;
   S.vorlage.felder = S.vorlage.felder || {};
@@ -136,7 +191,8 @@ async function oeffneEntwurf(name) {
   else if (S.muster.length) await waehleMuster(S.muster[0].id);
   else renderAnlernen();
 }
-async function ladeMuster() {
+async function ladeMuster() {   // nach Hinzufügen/Entfernen: Probelauf gilt nicht mehr
+  probeZurueck();
   S.muster = (await api("GET", `/api/entwurf/${S.name}`)).muster;
 }
 
@@ -327,6 +383,7 @@ function markieren(name) {
   meldungWeg();
   if (!aktuellesMuster()) return fehler("Zuerst ein Muster hinzufügen.");
   S.modus = name === "positionen" ? {art: "pos-tabelle", name} : {art: "feld", name};
+  S.spur = null;
   renderFelder();
   renderModus();
   zeichne();
@@ -372,17 +429,29 @@ function zeichne() {
     ctx.setLineDash([]);
     if (text) { ctx.fillStyle = f; ctx.fillText(text, r[0] * W, r[1] * H - 3 * d); }
   };
-  for (const [n, f] of Object.entries(S.vorlage.felder)) {
+  for (const [n, f] of Object.entries(S.spur && S.spur.id === S.aktiv ? {} : S.vorlage.felder)) {
     if (seiteVon(n, f.seite) !== S.seite) continue;
     rahmen(f.rahmen, wert, BESCHRIFTUNG[n] || n);
     if (f.anker) rahmen(f.anker.rahmen, anker, "");
   }
   const s = S.vorlage.steuern;
-  if (s && seiteVon("steuern", s.seite) === S.seite) {
+  if (s && !(S.spur && S.spur.id === S.aktiv) && seiteVon("steuern", s.seite) === S.seite) {
     rahmen(s.rahmen, wert, "Steuerzeile");
     if (s.anker) rahmen(s.anker.rahmen, anker, "");
   }
   const p = S.vorlage.positionen;
+  if (S.spur && S.spur.id === S.aktiv) {   // Probelauf: gefundene Rahmen grün, angelernte ohne Fund rot
+    const ok = farbe("--ok"), err = farbe("--err"), sp = Object.entries(S.spur.spur);
+    const name = (k) => BESCHRIFTUNG[k] || (k.startsWith("steuern") ? "Steuerzeile" : k.startsWith("positionen") ? "Positionen" : k);
+    for (const [k, e] of sp) if (e.seite + 1 === S.seite) rahmen(e.rahmen, ok, name(k));
+    const fehlt = (k) => !sp.some(([n]) => n === k || (n.startsWith(k) && /^\d+$/.test(n.slice(k.length))));
+    for (const [n, f] of Object.entries(S.vorlage.felder)) if (fehlt(n) && seiteVon(n, f.seite) === S.seite) rahmen(f.rahmen, err, name(n));
+    if (s && fehlt("steuern") && seiteVon("steuern", s.seite) === S.seite) rahmen(s.rahmen, err, "Steuerzeile");
+    if (p && p.spalten && fehlt("positionen") && seiteVon("positionen", "erste") === S.seite) {
+      rahmen([p.links, p.kopf ? p.kopf.rahmen[3] : (S.posOben ?? 0), p.spalten[p.spalten.length - 1].bis, p.unten], err, "Positionen");
+    }
+    return;
+  }
   if (p && p.spalten && seiteVon("positionen", "erste") === S.seite) {
     const rechts = p.spalten[p.spalten.length - 1].bis, oben = p.kopf ? p.kopf.rahmen[3] : (S.posOben ?? 0);
     rahmen([p.links, oben, rechts, p.unten], dumpf, "Positionen", 1.5);
@@ -412,6 +481,7 @@ function renderAnlernen() {
   renderSeite();
   renderSpalten();
   renderModus();
+  renderProbe();
 }
 function renderMuster() {
   if (!S.name) return;
@@ -498,6 +568,7 @@ function renderHinweis() {
   let t;
   if (!aktuellesMuster()) t = "Zuerst ein Muster hinzufügen.";
   else if (laedt(S.aktiv)) t = aktuellesMuster().text ? "Wörter werden gelesen …" : "Texterkennung läuft, das dauert je Seite einige Sekunden …";
+  else if (S.spur && S.spur.id === S.aktiv) t = "Probelauf: grün die gefundenen Rahmen, rot angelernte Felder ohne Fund (an der angelernten Stelle).";
   else if (!m) t = "Feld wählen und „Markieren“ drücken.";
   else if (m.art === "feld") t = m.name === "kaeufer" ? "Rahmen um die Anschrift des Käufers ziehen (Name bis PLZ und Ort). Esc bricht ab."
     : m.name === "steuern" ? "Rahmen um den Steuerbetrag einer Steuerzeile ziehen (z. B. hinter „MwSt. 19 %“). Esc bricht ab."
@@ -514,6 +585,7 @@ function renderModus() {
   const m = S.modus, box = $("modus-aktionen"), k = [];
   const fertig = () => { S.modus = null; renderFelder(); renderModus(); zeichne(); };
   const modus = (art, text) => knopf(text, () => { S.modus = {art, name: "positionen"}; renderModus(); zeichne(); }, {"aria-pressed": m && m.art === art ? "true" : "false"});
+  if (S.spur && S.spur.id === S.aktiv) k.push(knopf("Rahmen ausblenden", () => { S.spur = null; renderModus(); zeichne(); }));
   if (m && m.art === "feld") k.push(knopf("Abbrechen", fertig));
   if (m && m.art === "anker") {
     if (m.name !== "steuern") k.push(knopf("ohne Anker", () => ohneAnker(m.name)));
@@ -527,6 +599,121 @@ function renderModus() {
   box.replaceChildren(...k);
 }
 
+// ---------- Probelauf und Aktivieren ----------
+function probeZurueck() {   // Vorlage oder Muster geändert: Ergebnis und laufender Probelauf gelten nicht mehr
+  if (S.probe === null && S.spur === null) return;
+  S.probe = null;
+  S.spur = null;
+  S.probeNr += 1;
+  renderProbe();
+}
+async function probelauf() {
+  await speichernJetzt();
+  const nr = S.probeNr + 1, name = S.name;
+  S.probeNr = nr;
+  S.probe = {laeuft: true};
+  S.spur = null;
+  renderProbe();
+  zeichne();
+  try {
+    // läuft synchron auf dem Server, bei Bild-PDFs mit Texterkennung auch Minuten: bewusst ohne Zeitgrenze
+    const ergebnis = await api("POST", `/api/entwurf/${encodeURIComponent(name)}/probelauf`, {});
+    if (nr === S.probeNr && name === S.name) zeigeProbelauf(ergebnis);
+  } catch (e) {
+    if (nr === S.probeNr && name === S.name) { S.probe = null; renderProbe(); }
+    throw e;
+  }
+}
+const euro = (b) => `${b} €`;
+const satz = (x) => `${String(x).replace(".", ",").replace(/,0+$/, "")} %`;
+function zeigeProbelauf(ergebnis) {
+  S.probe = {ergebnis, haken: new Set()};
+  renderProbe();
+  $("probe").scrollIntoView({block: "start"});
+}
+function musterKarte(m) {
+  const info = S.muster.find(x => x.id === m.id), datei = info ? info.datei : m.id;
+  const kopf = el("div", {class: "probe-kopf"}, el("h3", {}, el("span", {class: "mono"}, m.id), ` · ${datei}`),
+    el("span", {class: m.ok ? "pill ok" : "pill err"}, m.ok ? "bestanden" : "Fehler"),
+    knopf("Rahmen anzeigen", () => mitMeldung(async () => {
+      S.modus = null;
+      S.spur = {id: m.id, spur: m.spur};
+      await waehleMuster(m.id);
+      $("bild").scrollIntoView({block: "start"});
+    }), {class: "btn btn-secondary btn-sm nur-gross"}));
+  if (!m.ok) return el("section", {class: "card"}, kopf, el("div", {class: "alert err"}, m.fehler));
+  const w = m.werte, zeilen = [["Nummer", w.nummer], ["Datum", w.datum], ["Fälligkeit", w.faellig || "–"], ["Käufer", w.kaeufer],
+    ["Netto", euro(w.summe_netto)], ...Object.entries(w.steuern).map(([s, b]) => [`USt ${satz(s)}`, euro(b)]), ["Brutto", euro(w.summe_brutto)]];
+  const id = `haken-${m.id}`;
+  const haken = el("input", {type: "checkbox", id, checked: S.probe.haken.has(m.id), onchange: () => {
+    if (haken.checked) S.probe.haken.add(m.id); else S.probe.haken.delete(m.id);
+    renderKopf();
+  }});
+  const k = el("section", {class: "card"}, kopf,
+    el("dl", {class: "werte"}, ...zeilen.flatMap(([n, x]) => [el("dt", {}, n), el("dd", {}, x)]),
+      el("dt", {}, "Mustang"), el("dd", {class: "mono"}, m.mustang || "–")),
+    el("h4", {}, `Positionen (${m.positionen.length})`),
+    el("div", {class: "table-wrap"}, el("table", {},
+      el("thead", {}, el("tr", {}, ...["Pos.", "Bezeichnung", "Menge", "Einheit", "Einzelpreis", "USt", "Netto"].map((t, i) =>
+        el("th", {class: [2, 4, 5, 6].includes(i) ? "num" : null}, t)))),
+      el("tbody", {}, ...m.positionen.map(p => el("tr", {},
+        el("td", {class: "mono"}, p[0]), el("td", {}, p[1]), el("td", {class: "num"}, String(p[2]).replace(".", ",")), el("td", {}, p[3]),
+        el("td", {class: "num"}, euro(p[4])), el("td", {class: "num"}, satz(p[5])), el("td", {class: "num"}, euro(p[6]))))))));
+  if (m.ignoriert.length) {
+    k.append(el("h4", {}, "Ignorierte Zeilen"), el("div", {class: "hint"}, "Übertrag/Zwischensumme – prüfen, ob keine Position darunter ist"),
+      el("ul", {class: "ignoriert"}, ...m.ignoriert.map(z => el("li", {class: "mono"}, z))));
+  }
+  k.append(el("div", {class: "haken"}, haken, el("label", {for: id}, "Nummer, Datum und Käufer stimmen mit der Rechnung überein")));
+  return k;
+}
+function renderKopf() {
+  const p = S.probe, e = p && p.ergebnis, laeuft = !!(p && p.laeuft), wartet = S.uac !== null;
+  const alle = e && e.muster.filter(m => m.ok).every(m => p.haken.has(m.id));
+  $("probelauf").hidden = !!e;
+  $("probelauf").disabled = laeuft || !S.name;
+  $("probelauf").textContent = laeuft ? "Probelauf läuft …" : "Probelauf";
+  $("probe-wiederholen").hidden = !e;
+  $("probe-wiederholen").disabled = wartet;
+  $("aktivieren").hidden = !e;
+  $("aktivieren").disabled = !(e && e.bereit && alle) || wartet;
+  $("aktivieren").textContent = wartet ? "Warte auf Freigabe …" : "Vorlage aktivieren";
+}
+function renderProbe() {
+  renderKopf();
+  const p = S.probe, box = $("probe-inhalt");
+  $("probe").hidden = !S.name || !p;
+  if (!p) return box.replaceChildren();
+  if (p.laeuft) {
+    $("probe-titel").textContent = "Probelauf";
+    return box.replaceChildren(el("div", {class: "alert info"}, "Probelauf läuft. Texterkennung und Mustang-Prüfung dauern je Muster einige Sekunden, bei Bild-PDFs auch länger."));
+  }
+  const e = p.ergebnis;
+  if (e.vorlage_fehler) {
+    $("probe-titel").textContent = "Probelauf: Vorlage unvollständig";
+    return box.replaceChildren(el("div", {class: "alert err"}, e.vorlage_fehler));
+  }
+  const ok = e.muster.filter(m => m.ok).length, n = e.muster.length;
+  $("probe-titel").textContent = `Probelauf: ${ok} von ${n} ${n === 1 ? "Muster" : "Mustern"} bestanden` + (n < 2 ? " · mindestens 2 Muster nötig" : "");
+  box.replaceChildren(
+    e.bereit ? el("div", {class: "alert info"}, S.uac !== null ? UAC_WARTEN : UAC_HINWEIS) : null,
+    ...e.muster.map(musterKarte));
+}
+async function aktivieren() {
+  const p = S.probe, name = S.name;
+  S.uac = name;
+  renderProbe();
+  let r;
+  try {
+    r = await api("POST", `/api/entwurf/${encodeURIComponent(name)}/aktivieren`, {bestaetigt: [...p.haken]});
+  } finally {
+    S.uac = null;
+    renderProbe();
+  }
+  if (!r.ok) return fehler(r.meldung);
+  S.erfolg = "Vorlage aktiv. Rechnungen in diesem Layout werden ab sofort umgewandelt.";
+  location.hash = "#vorlagen";
+}
+
 // ---------- Ansichten ----------
 function zeigeAnsicht() {
   const h = location.hash || "#vorlagen", lern = h.startsWith("#anlernen");
@@ -538,7 +725,7 @@ function zeigeAnsicht() {
   const name = decodeURIComponent(h.slice("#anlernen/".length));
   if (lern && name && name !== S.name) mitMeldung(() => oeffneEntwurf(name));
   else if (lern) renderAnlernen();
-  else mitMeldung(ladeStand);
+  else mitMeldung(ladeStand).then(() => { if (S.erfolg) { meldung(S.erfolg, "ok"); S.erfolg = null; } });
 }
 async function neueVorlage() {
   const feld = $("neu-name"), name = feld.value.trim();
@@ -624,6 +811,9 @@ function verbinde() {
   $("neu-anlegen").addEventListener("click", () => mitMeldung(neueVorlage));
   $("neu-name").addEventListener("keydown", (ev) => { if (ev.key === "Enter") mitMeldung(neueVorlage); });
   $("beenden").addEventListener("click", () => mitMeldung(beenden));
+  $("probelauf").addEventListener("click", () => mitMeldung(probelauf));
+  $("probe-wiederholen").addEventListener("click", () => mitMeldung(probelauf));
+  $("aktivieren").addEventListener("click", () => mitMeldung(aktivieren));
   window.addEventListener("hashchange", zeigeAnsicht);
   window.addEventListener("beforeunload", () => {   // keepalive: das PUT überlebt das Schließen des Fensters
     if (S.timer === null) return;
